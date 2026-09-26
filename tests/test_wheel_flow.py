@@ -1,22 +1,10 @@
 """Прогон онбординга колеса через хендлеры с поддельными объектами Telegram."""
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
 from bot.handlers.start import cmd_start
 from bot.handlers.wheel import on_wheel_callback
 from bot.models import OnboardingStep
 from bot.services import wheel
 from bot.services.users import get_or_create_user
-
-TG_USER = SimpleNamespace(id=42, username="anna", first_name="Анна")
-
-
-def make_message():
-    return SimpleNamespace(from_user=TG_USER, answer=AsyncMock(), edit_text=AsyncMock(), edit_reply_markup=AsyncMock())
-
-
-def make_callback(data, message):
-    return SimpleNamespace(from_user=TG_USER, data=data, message=message, answer=AsyncMock())
+from tests.helpers import TG_USER, make_callback, make_message
 
 
 async def press(sessionmaker, data, message):

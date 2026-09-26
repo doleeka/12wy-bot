@@ -25,7 +25,8 @@ bot/
   middlewares.py   сессия БД на каждый апдейт
   texts.py         все тексты бота
   keyboards.py     inline-клавиатуры
-  handlers/        start.py (/start), wheel.py (колесо баланса)
+  handlers/        start.py (/start), wheel.py (колесо баланса),
+                   onboarding.py (Explore, Eliminate, Intent, тактики, /plan)
   services/        бизнес-логика без привязки к Telegram
 tests/
 ```
@@ -38,7 +39,7 @@ tests/
 - [x] Модели: users, wheel_of_balance, explore_list, priorities, essential_intent, weekly_tactics, checkins, teams, team_members
 - [x] Настройка бота через `.env`
 - [x] `/start` + колесо баланса (6 основных сфер + до 2 дополнительных, визуализация и просадки)
-- [ ] Explore → Eliminate (ровно 3) → Essential intent → Тактики
+- [x] Explore → Eliminate (ровно 3) → Essential intent → Тактики, `/plan`
 - [ ] Автораспределение в команды (до 3 человек), `/moveteam`
 - [ ] Еженедельный чек-ин и scorecard, `send_report`
 - [ ] Автобэкап базы админу (APScheduler)

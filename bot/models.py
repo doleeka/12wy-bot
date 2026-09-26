@@ -60,6 +60,8 @@ class User(Base):
     # Номер текущего 12-недельного цикла и дата его старта (неделя 1 = cycle_start)
     cycle: Mapped[int] = mapped_column(Integer, default=1)
     cycle_start: Mapped[date | None] = mapped_column(Date)
+    # На шаге тактик — позиция приоритета (1..3), к которому сейчас добавляются тактики
+    onboarding_position: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -95,6 +97,8 @@ class ExploreItem(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     cycle: Mapped[int] = mapped_column(Integer, default=1)
     text: Mapped[str] = mapped_column(Text)
+    # Отмечен на шаге Eliminate (выбрать нужно ровно 3)
+    selected: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="explore_items")

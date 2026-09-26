@@ -8,7 +8,8 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import keyboards, texts
-from bot.handlers.wheel import send_wheel_result, wheel_question
+from bot.handlers.onboarding import send_step_prompt
+from bot.handlers.wheel import wheel_question
 from bot.models import OnboardingStep
 from bot.services import wheel
 from bot.services.users import get_or_create_user
@@ -31,9 +32,4 @@ async def cmd_start(message: Message, session: AsyncSession) -> None:
         await message.answer(text, reply_markup=markup)
         return
 
-    # Следующие шаги онбординга подключим по мере готовности
-    scores = await wheel.get_scores(session, user)
-    await message.answer(texts.WHEEL_ALREADY_DONE)
-    if scores:
-        await send_wheel_result(message, scores)
-    await message.answer(texts.EXPLORE_COMING)
+    await send_step_prompt(message, session, user)

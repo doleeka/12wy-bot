@@ -11,14 +11,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker, init_db
-from bot.handlers import start, wheel
+from bot.handlers import onboarding, start, wheel
 from bot.middlewares import DbSessionMiddleware
 
 
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
-    dp.include_routers(start.router, wheel.router)
+    dp.include_routers(start.router, wheel.router, onboarding.router)
     return dp
 
 

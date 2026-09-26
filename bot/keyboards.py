@@ -33,3 +33,57 @@ def wheel_extras(extras: list[Sphere]) -> InlineKeyboardMarkup:
     builder.adjust(2)
     builder.row(InlineKeyboardButton(text="Нет, покажи результат →", callback_data="wheel:finish"))
     return builder.as_markup()
+
+
+# ---------- Explore / Eliminate / Tactics ----------
+#   explore:done | explore:delmenu | explore:del:<id> | explore:back
+#   elim:t:<id> | elim:ok | elim:back
+#   tac:keep | tac:next:<position>
+
+BUTTON_TEXT_LEN = 40
+
+
+def short(text: str, limit: int = BUTTON_TEXT_LEN) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def explore_list(has_items: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if has_items:
+        builder.button(text="✕ Убрать пункт", callback_data="explore:delmenu")
+    builder.button(text="Готово →", callback_data="explore:done")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def explore_delete(items) -> InlineKeyboardMarkup:  # noqa: ANN001
+    builder = InlineKeyboardBuilder()
+    for item in items:
+        builder.button(text=f"✕ {short(item.text)}", callback_data=f"explore:del:{item.id}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="← Назад", callback_data="explore:back"))
+    return builder.as_markup()
+
+
+def eliminate(items) -> InlineKeyboardMarkup:  # noqa: ANN001
+    builder = InlineKeyboardBuilder()
+    for item in items:
+        mark = "✅" if item.selected else "▫️"
+        builder.button(text=f"{mark} {short(item.text)}", callback_data=f"elim:t:{item.id}")
+    builder.adjust(1)
+    selected = sum(i.selected for i in items)
+    builder.row(InlineKeyboardButton(text=f"Подтвердить ({selected}/3)", callback_data="elim:ok"))
+    builder.row(InlineKeyboardButton(text="← Дописать в список", callback_data="elim:back"))
+    return builder.as_markup()
+
+
+def tactic_next(position: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Дальше →", callback_data=f"tac:next:{position}")]]
+    )
+
+
+def tactic_keep() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Оставить как есть", callback_data="tac:keep")]]
+    )

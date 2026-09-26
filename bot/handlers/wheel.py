@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import keyboards, texts
+from bot.handlers.onboarding import send_step_prompt
 from bot.models import OnboardingStep, User
 from bot.services import wheel
 from bot.services.users import get_or_create_user
@@ -43,14 +44,10 @@ def wheel_result_text(scores: dict[str, int]) -> str:
     return texts.WHEEL_RESULT.format(chart=wheel.render_chart(scores), average=wheel.average(scores), lows=lows_text)
 
 
-async def send_wheel_result(message: Message, scores: dict[str, int]) -> None:
-    await message.answer(wheel_result_text(scores))
-
-
-async def _finish(callback: CallbackQuery, user: User, scores: dict[str, int]) -> None:
+async def _finish(callback: CallbackQuery, session: AsyncSession, user: User, scores: dict[str, int]) -> None:
     user.onboarding_step = OnboardingStep.EXPLORE
     await callback.message.edit_text(wheel_result_text(scores))
-    await callback.message.answer(texts.EXPLORE_COMING)
+    await send_step_prompt(callback.message, session, user)
 
 
 @router.callback_query(F.data.startswith("wheel:"))
@@ -77,7 +74,7 @@ async def on_wheel_callback(callback: CallbackQuery, session: AsyncSession) -> N
         await wheel.save_score(session, user, sphere_key, score)
         scores[sphere_key] = score
         if wheel.next_core_sphere(scores) is None and not wheel.available_extras(scores):
-            await _finish(callback, user, scores)
+            await _finish(callback, session, user, scores)
         else:
             text, markup = wheel_question(scores)
             await callback.message.edit_text(text, reply_markup=markup)
@@ -94,6 +91,6 @@ async def on_wheel_callback(callback: CallbackQuery, session: AsyncSession) -> N
         if wheel.next_core_sphere(scores) is not None:
             await callback.answer()
             return
-        await _finish(callback, user, scores)
+        await _finish(callback, session, user, scores)
 
     await callback.answer()
