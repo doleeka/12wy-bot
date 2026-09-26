@@ -122,37 +122,45 @@
     <!-- Тактики -->
     <section class="screen" id="screen-tactics" hidden>
       <h1>Что ты будешь делать?</h1>
-      <p class="muted">Цель — это куда. Тактика — это действие, по которому в конце недели можно честно ответить «да» или «нет».</p>
-      <div class="card">
-        <p>❌ «Больше заботиться о здоровье»<br>✅ «3 тренировки по 30 минут»</p>
-        <p class="muted small">Обычно 3–8 тактик на приоритет: регулярные (каждую неделю) и контрольные точки — например, недели 4, 8 и 12.</p>
-      </div>
+      <p class="muted">Для каждого приоритета — конкретные действия. По ним в конце недели можно честно ответить «да» или «нет».</p>
+      <div class="card soft example"><span>❌ «Больше заботиться о здоровье»</span><span>✅ «3 тренировки по 30 минут — пн, ср, пт»</span></div>
       <div id="tactic-groups"></div>
-      <h2>План на 12 недель</h2>
-      <div class="plan-grid" id="tactics-grid"></div>
-      <p class="muted small" id="buffer-hint"></p>
     </section>
 
-    <!-- Редактор тактики -->
+    <!-- Мастер действия: что сделаешь → как часто → когда -->
     <section class="screen" id="screen-tactic-edit" hidden>
       <p class="eyebrow" id="edit-priority"></p>
-      <h1 id="edit-title">Новая тактика</h1>
-      <label class="field-label" for="tactic-text">Действие</label>
-      <textarea id="tactic-text" class="field" rows="2" maxlength="200" placeholder="Например: 3 тренировки по 30 минут"></textarea>
-      <p class="hint-line" id="measurable-hint"></p>
-      <p class="field-label">Когда</p>
-      <div class="segmented" id="schedule-mode" role="radiogroup">
-        <button type="button" data-mode="every" role="radio">Каждую неделю</button>
-        <button type="button" data-mode="some" role="radio">Выбрать недели</button>
-        <button type="button" data-mode="one" role="radio">Одна неделя</button>
+      <ol class="mini-steps" id="wz-steps" aria-label="Шаги">
+        <li data-i="1">Действие</li><li data-i="2">Как часто</li><li data-i="3">Когда</li>
+      </ol>
+
+      <div class="wz" id="wz-1">
+        <h1>Что ты реально сделаешь?</h1>
+        <p class="muted">Одно конкретное действие, которое можно отметить «сделано» или «нет».</p>
+        <div class="card soft example"><span>❌ «Подготовиться к CFA»</span><span>✅ «Решить 3 блока CFA по 45 минут»</span></div>
+        <div class="chips quick" id="tactic-templates" aria-label="Шаблоны"></div>
+        <textarea id="tactic-text" class="field" rows="2" maxlength="200" aria-label="Действие"></textarea>
+        <p class="hint-line" id="measurable-hint"></p>
+        <button class="link danger" id="delete-tactic" hidden>Удалить действие</button>
       </div>
-      <div id="day-picker">
-        <p class="field-label">В какие дни</p>
+
+      <div class="wz" id="wz-2" hidden>
+        <h1>Как часто?</h1>
+        <p class="muted" id="wz-text"></p>
+        <div class="options" role="radiogroup" id="schedule-mode">
+          <button type="button" class="option" data-mode="every" role="radio"><b>Каждую неделю</b><span>Регулярное действие — например, тренировки или уроки</span></button>
+          <button type="button" class="option" data-mode="one" role="radio"><b>В конкретную неделю</b><span>Разовое — например, сдать тест или запустить сайт</span></button>
+          <button type="button" class="option" data-mode="some" role="radio"><b>Несколько недель</b><span>Контрольные точки — например, недели 4, 8 и 12</span></button>
+        </div>
+      </div>
+
+      <div class="wz" id="wz-3" hidden>
+        <h1 id="wz3-title">Когда?</h1>
+        <p class="muted" id="wz3-text"></p>
         <div class="day-grid" id="day-grid" role="group" aria-label="Дни недели"></div>
+        <div class="week-grid" id="week-grid" hidden></div>
+        <p class="muted small" id="weeks-summary"></p>
       </div>
-      <div class="week-grid" id="week-grid" hidden></div>
-      <p class="muted small" id="weeks-summary"></p>
-      <button class="link danger" id="delete-tactic" hidden>Удалить тактику</button>
     </section>
 
     <!-- Цель и «зачем» -->
@@ -178,11 +186,16 @@
         <button class="link" id="plan-reselect">↺ Выбрать 3 приоритета заново</button>
       </div>
       <div id="plan-priorities"></div>
+      <div class="card warn" id="plan-overload" hidden></div>
       <h2>По неделям</h2>
-      <div class="plan-grid" id="plan-grid"></div>
-      <p class="muted small" id="plan-buffer"></p>
-      <button class="link" id="edit-plan" hidden>← Изменить тактики</button>
-
+      <div id="plan-every"></div>
+      <div class="weeks" id="plan-weeks"></div>
+      <details class="card more overview">
+        <summary>Обзор нагрузки</summary>
+        <div class="plan-grid" id="plan-grid"></div>
+        <p class="muted small" id="plan-buffer"></p>
+      </details>
+      <button class="link" id="edit-plan" hidden>← Изменить действия</button>
     </section>
 
     <!-- Готова -->

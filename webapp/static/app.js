@@ -728,18 +728,16 @@
         btn.addEventListener("click", () => openEditor(p, t));
         group.appendChild(btn);
       });
-      const add = el2("button", "add-tactic", "+ Тактика");
+      const add = el2("button", "add-tactic", p.tactics.length ? "+ Ещё действие" : "+ Добавить действие");
       add.disabled = p.tactics.length >= plan.max_per_priority;
       add.addEventListener("click", () => openEditor(p, null));
       group.appendChild(add);
       const n = p.tactics.length;
       const [lo, hi] = plan.recommended;
-      if (n && n < lo) group.appendChild(el2("p", "count-note", "Обычно " + lo + "–" + hi + " тактик: регулярные и контрольные точки."));
+      if (n && n < lo) group.appendChild(el2("p", "count-note", "Обычно " + lo + "–" + hi + " действий: регулярные и контрольные точки."));
       if (n >= plan.max_per_priority) group.appendChild(el2("p", "count-note", "Максимум " + plan.max_per_priority + " — меньше, но лучше."));
       box.appendChild(group);
     });
-    renderGrid($("#tactics-grid"), plan);
-    $("#buffer-hint").textContent = bufferText(plan);
     const missing = plan.priorities.find((p) => !p.tactics.length);
     const doneLabel = planConfirmed() ? "Готово" : "Посмотреть итоговый план";
     const next = planConfirmed() ? () => showPlan("view") : () => showPlan("review");
@@ -801,49 +799,132 @@
     } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
-  // ---------- редактор тактики ----------
+  // ---------- мастер действия: что сделаешь → как часто → когда ----------
+
+  // Шаблоны по контексту приоритета — чтобы не начинать с чистого листа
+  const TEMPLATES = [
+    [/клиент|бизнес|проект|репетитор|продаж|доход|деньг|заработ/i, ["Найти первых клиентов", "Запустить страницу", "Провести 10 интервью", "Опубликовать 12 постов"]],
+    [/англ|язык|учёб|учеб|экзамен|курс|cfa|ielts|сертиф/i, ["Заниматься 3 раза по 45 минут", "Решить 1 пробный тест", "Выучить 50 слов", "Сдать экзамен"]],
+    [/здоров|спорт|бег|трениров|вес|сон|питан/i, ["3 тренировки по 30 минут", "Ложиться до 23:00", "10 000 шагов в день", "Забег 5 км"]],
+    [/книг|писать|блог|контент|пост/i, ["Писать 500 слов", "Опубликовать 1 пост", "Закончить главу"]],
+  ];
+  const GENERIC = ["Выделить 2 часа на …", "Сделать 1 шаг к …", "Встретиться / созвониться с …"];
+
+  function templatesFor(title) {
+    const hit = TEMPLATES.find(([re]) => re.test(title));
+    return hit ? hit[1] : GENERIC;
+  }
+
+  function weekRange(n) {
+    const [y, m, d] = state.plan.cycle_start.split("-").map(Number);
+    const start = new Date(y, m - 1, d + 7 * (n - 1));
+    const end = new Date(y, m - 1, d + 7 * (n - 1) + 6);
+    const fmt = (x) => x.getDate() + " " + MONTHS[x.getMonth()];
+    return start.getMonth() === end.getMonth() ? start.getDate() + "–" + fmt(end) : fmt(start) + " – " + fmt(end);
+  }
 
   function openEditor(priority, tactic) {
     const weeks = tactic && tactic.weeks ? tactic.weeks : null;
     state.edit = {
+      priority,
       priorityId: priority.id,
       tacticId: tactic ? tactic.id : null,
-      mode: weeks == null ? "every" : weeks.length === 1 ? "one" : "some",
+      sub: 1,
+      mode: tactic ? (weeks == null ? "every" : weeks.length === 1 ? "one" : "some") : null,
       weeks: new Set(weeks || []),
       days: new Set((tactic && tactic.days) || []),
     };
-    show("screen-tactic-edit");
     $("#edit-priority").textContent = priority.position + ". " + priority.title;
-    $("#edit-title").textContent = tactic ? "Тактика" : "Новая тактика";
     const ta = $("#tactic-text");
     ta.value = tactic ? tactic.text : "";
+    ta.placeholder = "Например: " + templatesFor(priority.title)[0];
     $("#delete-tactic").hidden = !tactic;
-    backButton(showTactics);
+    const box = $("#tactic-templates");
+    box.innerHTML = "";
+    templatesFor(priority.title).concat(["Своё действие"]).forEach((t) => {
+      const chip = el2("button", "chip", t);
+      chip.type = "button";
+      chip.addEventListener("click", () => {
+        ta.value = t === "Своё действие" ? "" : t.replace(/ …$/, " ");
+        ta.focus();
+        renderEditor();
+      });
+      box.appendChild(chip);
+    });
+    show("screen-tactic-edit");
     renderEditor();
     if (!tactic) ta.focus();
   }
 
-  function editorValid() {
+  function scheduleValid() {
     const e = state.edit;
-    const text = $("#tactic-text").value.trim();
-    if (!text) return false;
-    if (e.mode === "some") return e.weeks.size >= 1;
+    if (e.mode === "some") return e.weeks.size >= 2;
     if (e.mode === "one") return e.weeks.size === 1;
-    return e.days.size >= 1; // еженедельная — нужен хотя бы один день
+    if (e.mode === "every") return e.days.size >= 1;
+    return false;
+  }
+
+  function goSub(n) {
+    state.edit.sub = n;
+    window.scrollTo(0, 0);
+    renderEditor();
   }
 
   function renderEditor() {
     const e = state.edit;
-    document.querySelectorAll("#schedule-mode button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === e.mode)));
+    [1, 2, 3].forEach((i) => ($("#wz-" + i).hidden = e.sub !== i));
+    document.querySelectorAll("#wz-steps li").forEach((li) => {
+      const i = Number(li.dataset.i);
+      li.className = i === e.sub ? "now" : i < e.sub ? "done" : "";
+    });
+    const text = $("#tactic-text").value.trim();
+    backButton(e.sub > 1 ? () => goSub(e.sub - 1) : toTactics);
+
+    if (e.sub === 1) {
+      // регулярное без числа обычно размыто — мягкая подсказка, не запрет
+      $("#measurable-hint").textContent = text && !MEASURABLE.test(text) && e.mode !== "one" && e.mode !== "some"
+        ? "💡 Если это регулярное действие — добавь число: сколько раз, минут, страниц?" : "";
+      mainButton("Дальше", () => goSub(2), !!text);
+      status(text ? "" : "Напиши действие или выбери шаблон");
+      return;
+    }
+    if (e.sub === 2) {
+      $("#wz-text").textContent = "«" + text + "»";
+      document.querySelectorAll("#schedule-mode .option").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === e.mode)));
+      mainButton("Дальше", () => goSub(3), !!e.mode);
+      status(e.mode ? "" : "Выбери, как часто");
+      return;
+    }
+    // шаг 3: дни недели — для еженедельных; недели цикла — для разовых и контрольных точек
+    const every = e.mode === "every";
+    $("#wz3-title").textContent = every ? "В какие дни?" : e.mode === "one" ? "В какую неделю?" : "В какие недели?";
+    $("#wz3-text").textContent = every ? "Каждую неделю, все 12 недель." : e.mode === "one" ? "Выбери одну неделю из 12." : "Отметь 2 и больше недель — например, 4, 8 и 12.";
+    $("#day-grid").hidden = !every;
+    $("#week-grid").hidden = every;
+    const dayGrid = $("#day-grid");
+    dayGrid.innerHTML = "";
+    if (every) {
+      DAYS.forEach((name, d) => {
+        const b = el2("button", null, name);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(e.days.has(d)));
+        b.setAttribute("aria-label", DAYS_FULL[d]);
+        b.addEventListener("click", () => {
+          e.days.has(d) ? e.days.delete(d) : e.days.add(d);
+          haptic.tick();
+          renderEditor();
+        });
+        dayGrid.appendChild(b);
+      });
+    }
     const grid = $("#week-grid");
-    grid.hidden = e.mode === "every";
     grid.innerHTML = "";
-    if (e.mode !== "every") {
+    if (!every) {
       for (let w = 1; w <= 12; w++) {
         const b = el2("button", null, String(w));
         b.type = "button";
         b.setAttribute("aria-pressed", String(e.weeks.has(w)));
-        b.setAttribute("aria-label", "Неделя " + w);
+        b.setAttribute("aria-label", "Неделя " + w + ", " + weekRange(w));
         b.addEventListener("click", () => {
           if (e.mode === "one") e.weeks = new Set([w]);
           else e.weeks.has(w) ? e.weeks.delete(w) : e.weeks.add(w);
@@ -853,38 +934,21 @@
         grid.appendChild(b);
       }
     }
-    // дни недели — только для еженедельной тактики
-    $("#day-picker").hidden = e.mode !== "every";
-    const dayGrid = $("#day-grid");
-    dayGrid.innerHTML = "";
-    DAYS.forEach((name, d) => {
-      const b = el2("button", null, name);
-      b.type = "button";
-      b.setAttribute("aria-pressed", String(e.days.has(d)));
-      b.setAttribute("aria-label", DAYS_FULL[d]);
-      b.addEventListener("click", () => {
-        e.days.has(d) ? e.days.delete(d) : e.days.add(d);
-        haptic.tick();
-        renderEditor();
-      });
-      dayGrid.appendChild(b);
-    });
     const days = Array.from(e.days).sort((a, b) => a - b);
-    const sorted = Array.from(e.weeks).sort((a, b) => a - b);
+    const weeks = Array.from(e.weeks).sort((a, b) => a - b);
     $("#weeks-summary").textContent =
-      e.mode === "every" ? (!days.length ? "Выбери дни — например, пн, ср, пт для «3 тренировок»." :
-        days.length === 7 ? "Каждый день, все 12 недель." :
-        "Каждую неделю: " + days.map((d) => DAYS[d].toLowerCase()).join(", ") + ".") :
-      !sorted.length ? (e.mode === "one" ? "Выбери неделю." : "Отметь недели — например, 4, 8 и 12 как контрольные точки.") :
-      (sorted.length === 1 ? "Неделя " : "Недели ") + sorted.join(", ");
-    const text = $("#tactic-text").value.trim();
-    // для регулярных тактик: «каждую неделю» без числа обычно размыто; контрольная точка и так «да / нет»
-    $("#measurable-hint").textContent = text && e.mode === "every" && !MEASURABLE.test(text) ? "💡 Похоже на цель. Сделай измеримой: сколько раз, минут, страниц?" : "";
-    mainButton("Сохранить тактику", saveTactic, editorValid());
+      every ? (days.length === 7 ? "Каждый день." : days.length ? "Каждую неделю: " + days.map((d) => DAYS[d].toLowerCase()).join(", ") + "." : "") :
+      weeks.length === 1 ? "Неделя " + weeks[0] + " · " + weekRange(weeks[0]) + "." :
+      weeks.length ? "Недели " + weeks.join(", ") + "." : "";
+    mainButton("Сохранить действие", saveTactic, scheduleValid());
+    status(
+      scheduleValid() ? "" :
+      every ? "Выбери хотя бы один день" : e.mode === "one" ? "Выбери неделю" : "Отметь хотя бы 2 недели",
+    );
   }
 
   async function saveTactic() {
-    if (!editorValid()) return;
+    if (!scheduleValid()) return;
     const e = state.edit;
     const every = e.mode === "every";
     const body = {
@@ -903,7 +967,7 @@
   }
 
   function deleteTactic() {
-    tg.showConfirm("Удалить эту тактику?", async (ok) => {
+    tg.showConfirm("Удалить это действие?", async (ok) => {
       if (!ok) return;
       try {
         state.plan = await api("DELETE", "/api/tactics/" + state.edit.tacticId);
@@ -912,13 +976,72 @@
     });
   }
 
-  // ---------- итог плана ----------
+  // ---------- итоговый план: по неделям, матрица — обзор нагрузки ----------
+
+  // Перегруженная неделя: заметно больше обычной (медианы) — предупреждаем и предлагаем перераспределить
+  function overloadedWeeks(plan) {
+    const sorted = plan.load.slice().sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    return plan.load.map((n, i) => [i + 1, n]).filter(([, n]) => n >= median + 2 && n >= 4).map(([w, n]) => ({ w, n, median }));
+  }
+
+  function renderWeeks(plan) {
+    const all = [];
+    plan.priorities.forEach((p) => p.tactics.forEach((t) => all.push(Object.assign({ pos: p.position }, t))));
+    const every = all.filter((t) => t.weeks == null);
+    const everyBox = $("#plan-every");
+    everyBox.innerHTML = "";
+    if (every.length) {
+      const card = el2("div", "card week-card");
+      card.appendChild(el2("b", null, "Каждую неделю"));
+      const ul = el2("ul", "wk-list");
+      every.forEach((t) => {
+        const li = el2("li", "p" + t.pos, t.text);
+        if (t.days && t.days.length) li.appendChild(el2("span", null, " · " + t.days.map((d) => DAYS[d].toLowerCase()).join(", ")));
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      everyBox.appendChild(card);
+    }
+    const box = $("#plan-weeks");
+    box.innerHTML = "";
+    const heavy = new Set(overloadedWeeks(plan).map((o) => o.w));
+    for (let w = 1; w <= plan.weeks_total; w++) {
+      const special = all.filter((t) => t.weeks != null && t.weeks.includes(w));
+      const row = el2("div", "week-row" + (heavy.has(w) ? " heavy" : ""));
+      const head = el2("div", "wk-head");
+      head.append(el2("b", null, "Неделя " + w), el2("span", "muted small", weekRange(w)));
+      head.appendChild(el2("span", "wk-count", (heavy.has(w) ? "⚠ " : "") + plan.load[w - 1] + " " + plural(plan.load[w - 1], "действие", "действия", "действий")));
+      row.appendChild(head);
+      if (special.length) {
+        const ul = el2("ul", "wk-list");
+        special.forEach((t) => ul.appendChild(el2("li", "p" + t.pos, t.text)));
+        row.appendChild(ul);
+      } else if (every.length) {
+        row.appendChild(el2("p", "muted small", "Только регулярные действия"));
+      }
+      box.appendChild(row);
+    }
+    const warn = $("#plan-overload");
+    const over = overloadedWeeks(plan);
+    warn.hidden = !over.length;
+    if (over.length) {
+      warn.innerHTML = "";
+      warn.appendChild(el2("b", null, "⚠ " + (over.length === 1 ? "Неделя " + over[0].w + " перегружена" : "Недели " + over.map((o) => o.w).join(", ") + " перегружены")));
+      warn.appendChild(el2("p", null, "Там " + Math.max(...over.map((o) => o.n)) + " действий при обычных " + over[0].median + ". Перенеси часть на соседние недели — неделя, забитая на 100%, ломается от первого форс-мажора."));
+      if (plan.editable) {
+        const fix = el2("button", "link", "Перераспределить →");
+        fix.addEventListener("click", showTactics);
+        warn.appendChild(fix);
+      }
+    }
+  }
 
   function showPlan(mode) {
     const plan = state.plan;
     const review = mode === "review";
     show("screen-plan");
-    $("#plan-eyebrow").textContent = review ? "Шаг 6 · Итог" : "12 недель";
+    $("#plan-eyebrow").textContent = review ? "Проверь перед стартом" : "12 недель";
     $("#plan-title").textContent = review ? "Твой план на 12 недель" : "Мой план";
     const [y, m, d] = plan.cycle_start.split("-").map(Number);
     const started = new Date(y, m - 1, d) <= new Date();
@@ -929,7 +1052,11 @@
     box.innerHTML = "";
     plan.priorities.forEach((p) => {
       const card = el2("div", "card plan-prio");
-      card.append(el2("b", null, p.position + ". " + p.title), el2("p", "why", "Зачем: " + p.intent));
+      const title = el2("b", null, p.position + ". " + p.title);
+      const dot = el2("span", "dot-p");
+      dot.style.background = "var(--p" + p.position + ")";
+      title.prepend(dot);
+      card.append(title, el2("p", "why", "Зачем: " + p.intent));
       const ul = el2("ul");
       p.tactics.forEach((t) => {
         const li = el2("li", null, t.text + " ");
@@ -939,6 +1066,7 @@
       card.appendChild(ul);
       box.appendChild(card);
     });
+    renderWeeks(plan);
     renderGrid($("#plan-grid"), plan);
     $("#plan-buffer").textContent = bufferText(plan);
     $("#edit-plan").hidden = !review;
@@ -1195,14 +1323,15 @@
     });
     $("#back-to-explore").addEventListener("click", showExplore);
     $("#tactic-text").addEventListener("input", () => { autosize($("#tactic-text")); renderEditor(); });
-    document.querySelectorAll("#schedule-mode button").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#schedule-mode .option").forEach((b) => b.addEventListener("click", () => {
       const e = state.edit;
-      e.mode = b.dataset.mode;
-      if (e.mode === "one" && e.weeks.size > 1) e.weeks = new Set([Math.min(...e.weeks)]);
-      if (e.mode === "every") e.weeks = new Set();
-      else e.days = new Set();
+      if (e.mode !== b.dataset.mode) {
+        e.mode = b.dataset.mode;
+        e.weeks = new Set();
+        e.days = new Set();
+      }
       haptic.tick();
-      renderEditor();
+      goSub(3); // выбор частоты сразу ведёт к расписанию
     }));
     $("#delete-tactic").addEventListener("click", deleteTactic);
     $("#edit-plan").addEventListener("click", showTactics);

@@ -337,3 +337,39 @@ details.more[open] summary { margin-bottom: 6px; }
 .check input { position: absolute; opacity: 0; pointer-events: none; }
 .check { position: relative; }
 .error-line { color: var(--error); font-size: 14px; }
+
+/* ---------- мастер действия ---------- */
+.mini-steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 4px 0 12px; font-size: 13px; }
+.mini-steps li { flex: 1; text-align: center; padding: 6px 4px; border-radius: 8px; background: var(--bg-2); color: var(--hint); }
+.mini-steps li.now { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.mini-steps li.done { color: var(--text); }
+.mini-steps li.done::before { content: "✓ "; }
+.card.example { font-style: normal; }
+.options { display: grid; gap: 8px; margin-top: 8px; }
+.option {
+  display: grid; gap: 2px; text-align: left; background: var(--bg-2); border: 2px solid transparent; border-radius: 12px;
+  padding: 14px; font: inherit; color: var(--text); cursor: pointer;
+}
+.option span { color: var(--hint); font-size: 14px; }
+.option[aria-checked="true"] { border-color: var(--accent); background: var(--accent-tint); }
+:root[data-theme="dark"] .option[aria-checked="true"] { border-color: var(--link); }
+#tactic-text { margin-top: 8px; }
+
+/* ---------- план по неделям ---------- */
+.card.warn { border-left: 3px solid var(--warning); }
+.card.warn b { display: block; }
+.week-card b { display: block; margin-bottom: 4px; }
+.weeks { display: grid; gap: 6px; margin: 8px 0 12px; }
+.week-row { background: var(--bg-2); border-radius: 12px; padding: 10px 12px; }
+.week-row.heavy { box-shadow: inset 3px 0 0 var(--warning); }
+.wk-head { display: flex; align-items: baseline; gap: 8px; }
+.wk-head .wk-count { margin-left: auto; font-size: 13px; color: var(--hint); white-space: nowrap; }
+.week-row.heavy .wk-count { color: var(--text); font-weight: 600; }
+.week-row p { margin: 4px 0 0; }
+.wk-list { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; }
+.wk-list li { position: relative; padding-left: 16px; overflow-wrap: anywhere; }
+.wk-list li::before { content: ""; position: absolute; left: 0; top: .55em; width: 8px; height: 8px; border-radius: 50%; background: var(--pc, var(--hint)); }
+.wk-list li.p1 { --pc: var(--p1); } .wk-list li.p2 { --pc: var(--p2); } .wk-list li.p3 { --pc: var(--p3); }
+.wk-list li span { color: var(--hint); font-size: 14px; }
+.plan-prio b .dot-p { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+details.overview .plan-grid { margin-top: 10px; }
