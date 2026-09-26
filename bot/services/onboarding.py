@@ -175,3 +175,20 @@ def advance_tactics(user: User, today: date) -> bool:
     user.onboarding_position = position
     return False
 
+
+
+async def reset_onboarding(session: AsyncSession, user: User) -> None:
+    """Стирает онбординг текущего цикла (колесо, Explore, приоритеты с «зачем», тактиками и чек-инами).
+
+    Для тестов админом: пройти онбординг заново своими глазами. Команда сохраняется.
+    Каскад по внешним ключам удаляет «зачем», тактики и чек-ины вместе с приоритетами.
+    """
+    from bot.models import WheelOfBalance  # noqa: PLC0415 — нужен только здесь
+
+    for model in (Priority, ExploreItem, WheelOfBalance):
+        await session.execute(delete(model).where(model.user_id == user.id, model.cycle == user.cycle))
+    user.onboarding_step = OnboardingStep.WHEEL
+    user.onboarding_position = None
+    user.cycle_start = None
+    user.last_reported_week = None
+    await session.flush()

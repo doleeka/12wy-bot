@@ -40,3 +40,5 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings 
         return
 
     await send_step_prompt(message, session, user, today)
+    if settings and settings.webapp_url:
+        await message.answer(texts.OPEN_APP, reply_markup=keyboards.open_app(settings.webapp_url))

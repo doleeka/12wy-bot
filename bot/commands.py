@@ -32,6 +32,7 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="moveteam", description="Админ: перевести в команду"),
     BotCommand(command="report", description="Админ: куда слать отчёт"),
     BotCommand(command="backup", description="Админ: бэкап базы"),
+    BotCommand(command="resetme", description="Админ: пройти онбординг заново"),
     BotCommand(command="unlinkteam", description="Админ: отвязать чат команды"),
 ]
 GROUP_COMMANDS = [

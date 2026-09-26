@@ -12,6 +12,12 @@ from bot.services.wheel import MAX_SCORE, MIN_SCORE, Sphere
 #   wheel:finish
 
 
+def open_app(webapp_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🌿 Открыть приложение", web_app=WebAppInfo(url=webapp_url))]]
+    )
+
+
 def wheel_begin(webapp_url: str = "") -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="Начать колесо баланса 🎡", callback_data="wheel:begin")]]
     if webapp_url:
