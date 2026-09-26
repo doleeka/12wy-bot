@@ -12,9 +12,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
+from bot import texts
 from bot.commands import set_bot_commands
 from bot.handlers import admin, checkin, cycle, fallback, group, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
+from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
 
@@ -55,6 +57,13 @@ async def main() -> None:
     dp = build_dispatcher(sessionmaker)
     dp["settings"] = settings
 
+    # Если у токена остался webhook (бот раньше был подключён к другому сервису), Telegram не отдаёт
+    # обновления через getUpdates — бот работает, но не получает ни одного сообщения. Снимаем его.
+    webhook = await bot.get_webhook_info()
+    if webhook.url:
+        logging.warning("У бота был webhook %s — снимаю, чтобы работал long polling", webhook.url)
+        await bot.delete_webhook(drop_pending_updates=False)
+
     try:
         await set_bot_commands(bot, settings)
     except Exception:  # noqa: BLE001 — без меню бот всё равно работает
@@ -64,6 +73,8 @@ async def main() -> None:
     scheduler.start()
 
     logging.info("DB: %s", settings.database_path.resolve())
+    for admin_id in settings.admin_ids:
+        await safe_send(bot, admin_id, texts.BOT_STARTED)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
