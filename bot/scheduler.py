@@ -1,4 +1,4 @@
-"""Расписание: воскресный чек-ин, понедельничное напоминание о новой неделе, ночной бэкап."""
+"""Расписание: воскресный чек-ин, понедельничное напоминание о неделе (или итоги цикла), ночной бэкап."""
 from __future__ import annotations
 
 import asyncio
@@ -11,13 +11,14 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from bot import texts
+from bot import keyboards, texts
 from bot.backup_job import send_backup
 from bot.config import Settings, local_today
 from bot.handlers.checkin import build_checkin
+from bot.handlers.cycle import summary_text
 from bot.models import OnboardingStep, User
 from bot.notify import safe_send
-from bot.services import checkins, scorecard
+from bot.services import checkins, cycle, scorecard
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,15 @@ async def send_week_planning(bot: Bot, sessionmaker: async_sessionmaker, setting
     sent = 0
     async with sessionmaker() as session:
         users = await session.scalars(select(User).where(User.onboarding_step == OnboardingStep.DONE))
-        for user in users:
+        for user in list(users):
+            if cycle.maybe_finish_cycle(user, today):
+                # понедельник 13-й недели: вместо плана недели — итоги цикла
+                text = await summary_text(session, user, today)
+                if await safe_send(bot, user.telegram_id, text, keyboards.cycle_finish()):
+                    sent += 1
+                await session.commit()
+                await asyncio.sleep(SEND_DELAY)
+                continue
             n = scorecard.week_number(user.cycle_start, today)
             tactics = await checkins.active_tactics(session, user)
             if n is None or not tactics:

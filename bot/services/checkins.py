@@ -35,7 +35,8 @@ def checkin_week_number(user: User, week: date) -> int | None:
 
 def can_check_in(user: User, week: date, today: date) -> bool:
     return (
-        user.onboarding_step == OnboardingStep.DONE
+        # FINISHED — чтобы в понедельник 13-й недели ещё можно было отметить 12-ю
+        user.onboarding_step in (OnboardingStep.DONE, OnboardingStep.FINISHED)
         and checkin_week_number(user, week) is not None
         and week <= scorecard.week_start(today)
     )

@@ -46,6 +46,7 @@ class OnboardingStep(str, enum.Enum):
     INTENT = "intent"
     TACTICS = "tactics"
     DONE = "done"
+    FINISHED = "finished"  # 12 недель позади: неделя итогов / пауза до нового цикла
 
 
 class ReportTarget(str, enum.Enum):

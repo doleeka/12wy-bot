@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import keyboards, texts
 from bot.config import Settings, local_today
 from bot.models import OnboardingStep, Priority, User
+from bot.services import cycle
 from bot.services import onboarding as svc
 from bot.handlers.teams import join_team
 from bot.services.users import get_or_create_user
@@ -72,12 +74,17 @@ def plan_text(priorities: list[Priority]) -> str:
 
 # ---------- «где я сейчас» ----------
 
-async def send_step_prompt(message: Message, session: AsyncSession, user: User) -> None:
+async def send_step_prompt(message: Message, session: AsyncSession, user: User, today: date | None = None) -> None:
     """Отправляет подсказку текущего шага онбординга (после колеса баланса)."""
     step = user.onboarding_step
     if step == OnboardingStep.EXPLORE:
         items = await svc.get_explore_items(session, user)
         await message.answer(texts.EXPLORE_INTRO)
+        previous = await cycle.previous_priorities(session, user)
+        if previous:
+            await message.answer(
+                texts.EXPLORE_PREVIOUS.format(items="\n".join(f"• {escape(p.title)}" for p in previous))
+            )
         if items:
             await message.answer(explore_list_text(items), reply_markup=keyboards.explore_list(True))
     elif step == OnboardingStep.ELIMINATE:
@@ -95,6 +102,10 @@ async def send_step_prompt(message: Message, session: AsyncSession, user: User) 
             await message.answer(tactic_question(priority), reply_markup=markup)
     elif step == OnboardingStep.DONE:
         await message.answer(plan_text(await svc.get_priorities(session, user)) or texts.PLAN_EMPTY)
+    elif step == OnboardingStep.FINISHED:
+        from bot.handlers.cycle import send_summary  # локальный импорт: избегаем цикла импортов
+
+        await send_summary(message, session, user, today or date.today())
 
 
 # ---------- текстовые ответы ----------
@@ -120,8 +131,8 @@ async def on_text(
         question, markup = wheel_question(await wheel.get_scores(session, user))
         await message.answer(question, reply_markup=markup)
     else:
-        # ELIMINATE — выбор кнопками; DONE — показываем план
-        await send_step_prompt(message, session, user)
+        # ELIMINATE — выбор кнопками; DONE — план; FINISHED — итоги цикла
+        await send_step_prompt(message, session, user, local_today(settings))
 
 
 async def _on_explore_text(message: Message, session: AsyncSession, user: User, text: str) -> None:
@@ -313,7 +324,7 @@ async def on_tactic_callback(
 @router.message(Command("plan"))
 async def cmd_plan(message: Message, session: AsyncSession) -> None:
     user = await get_or_create_user(session, message.from_user)
-    if user.onboarding_step != OnboardingStep.DONE:
+    if user.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED):
         await message.answer(texts.PLAN_EMPTY)
         return
     await message.answer(plan_text(await svc.get_priorities(session, user)))

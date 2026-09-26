@@ -12,9 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import keyboards, texts
 from bot.config import Settings, local_today
 from bot.filters import IsAdmin
+from bot.handlers.cycle import send_summary
 from bot.models import OnboardingStep, ReportTarget, User
 from bot.notify import display_name, safe_edit, safe_send
-from bot.services import checkins, scorecard, teams
+from bot.services import checkins, cycle, scorecard, teams
 from bot.services.users import get_or_create_user
 
 router = Router(name="checkin")
@@ -23,11 +24,12 @@ _MARK = {True: "✅", False: "❌", None: "▫️"}
 
 
 def default_checkin_week(user: User, today: date) -> date:
-    """Текущая неделя; в понедельник — прошлая, если за неё ещё нет отчёта."""
+    """Текущая неделя. Прошлая — если за неё ещё нет отчёта и сегодня понедельник
+    или текущая неделя уже вне цикла (13-я неделя: 12-ю можно отметить в любой день)."""
     this_week = scorecard.week_start(today)
     prev_week = this_week - timedelta(days=7)
     if (
-        today.weekday() == 0
+        (today.weekday() == 0 or checkins.checkin_week_number(user, this_week) is None)
         and checkins.checkin_week_number(user, prev_week) is not None
         and (user.last_reported_week is None or user.last_reported_week < prev_week)
     ):
@@ -103,7 +105,7 @@ async def send_report(
 @router.message(Command("checkin"))
 async def cmd_checkin(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
     user = await get_or_create_user(session, message.from_user)
-    if user.onboarding_step != OnboardingStep.DONE:
+    if user.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED):
         await message.answer(texts.CHECKIN_NOT_READY)
         return
     today = local_today(settings)
@@ -112,7 +114,8 @@ async def cmd_checkin(message: Message, session: AsyncSession, settings: Setting
         if user.cycle_start and today < user.cycle_start:
             await message.answer(texts.CHECKIN_NOT_STARTED.format(start=f"{user.cycle_start:%d.%m}"))
         else:
-            await message.answer(texts.CHECKIN_CYCLE_OVER)
+            cycle.maybe_finish_cycle(user, today)
+            await send_summary(message, session, user, today)
         return
     text, markup = await build_checkin(session, user, week)
     await message.answer(text, reply_markup=markup)

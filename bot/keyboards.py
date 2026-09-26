@@ -107,3 +107,16 @@ def checkin_edit(week_ordinal: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="✏️ Изменить отметки", callback_data=f"ci:edit:{week_ordinal}")]]
     )
+
+
+# ---------- Итоги цикла ----------
+#   cycle:new | cycle:pause
+
+
+def cycle_finish() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Начать новый цикл 🌱", callback_data="cycle:new")],
+            [InlineKeyboardButton(text="Взять паузу", callback_data="cycle:pause")],
+        ]
+    )

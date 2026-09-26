@@ -30,7 +30,14 @@ def _mates_text(user: User, members: list[User]) -> str:
 async def join_team(
     message: Message, bot: Bot, session: AsyncSession, user: User, settings: Settings | None
 ) -> Team:
-    """Шаг 7 онбординга: распределить в команду и всем сообщить."""
+    """Шаг 7 онбординга: распределить в команду и всем сообщить.
+
+    В новом цикле участница уже в команде — тогда просто напоминаем, какая у неё команда.
+    """
+    existing = await teams.get_team_of(session, user)
+    if existing is not None:
+        await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))))
+        return existing
     team, created = await teams.assign_to_team(session, user)
     members = await teams.team_members(session, team.id)
     name = escape(teams.team_name(team))
@@ -72,6 +79,8 @@ async def cmd_team(message: Message, session: AsyncSession, bot: Bot, settings: 
     n = scorecard.week_number(user.cycle_start, today)
     if n is not None:
         week = texts.TEAM_WEEK.format(n=n)
+    elif user.cycle_start is None:
+        week = texts.TEAM_WEEK_PLANNING
     elif user.cycle_start and today < user.cycle_start:
         week = texts.TEAM_WEEK_NOT_STARTED.format(start=user.cycle_start.strftime("%d.%m"))
     else:

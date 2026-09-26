@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import keyboards, texts
 from bot.handlers.onboarding import send_step_prompt
 from bot.models import OnboardingStep, User
-from bot.services import wheel
+from bot.services import cycle, wheel
 from bot.services.users import get_or_create_user
 
 router = Router(name="wheel")
@@ -44,9 +44,24 @@ def wheel_result_text(scores: dict[str, int]) -> str:
     return texts.WHEEL_RESULT.format(chart=wheel.render_chart(scores), average=wheel.average(scores), lows=lows_text)
 
 
+def comparison_text(rows: list[tuple[wheel.Sphere, int, int]]) -> str:
+    lines = []
+    for sphere, before, after in rows:
+        diff = after - before
+        delta = f"(+{diff}) 🌱" if diff > 0 else f"({diff})" if diff < 0 else "(=)"
+        lines.append(
+            texts.WHEEL_COMPARISON_ROW.format(emoji=sphere.emoji, title=sphere.title, before=before, after=after, delta=delta)
+        )
+    return texts.WHEEL_COMPARISON.format(rows="\n".join(lines))
+
+
 async def _finish(callback: CallbackQuery, session: AsyncSession, user: User, scores: dict[str, int]) -> None:
     user.onboarding_step = OnboardingStep.EXPLORE
-    await callback.message.edit_text(wheel_result_text(scores))
+    text = wheel_result_text(scores)
+    comparison = await cycle.wheel_comparison(session, user)
+    if comparison:
+        text += "\n\n" + comparison_text(comparison)
+    await callback.message.edit_text(text)
     await send_step_prompt(callback.message, session, user)
 
 

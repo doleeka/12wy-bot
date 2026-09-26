@@ -42,9 +42,12 @@ _CORE_KEYS = {s.key for s in CORE_SPHERES}
 _EXTRA_KEYS = {s.key for s in EXTRA_SPHERES}
 
 
-async def get_scores(session: AsyncSession, user: User) -> dict[str, int]:
+async def get_scores(session: AsyncSession, user: User, cycle: int | None = None) -> dict[str, int]:
+    """Оценки колеса за цикл (по умолчанию — текущий цикл участницы)."""
     rows = await session.scalars(
-        select(WheelOfBalance).where(WheelOfBalance.user_id == user.id, WheelOfBalance.cycle == user.cycle)
+        select(WheelOfBalance).where(
+            WheelOfBalance.user_id == user.id, WheelOfBalance.cycle == (cycle or user.cycle)
+        )
     )
     return {row.sphere: row.score for row in rows}
 
