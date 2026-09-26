@@ -89,6 +89,17 @@ async def toggle_selection(session: AsyncSession, user: User, item_id: int) -> E
     return item
 
 
+async def set_selection(session: AsyncSession, user: User, item_ids: list[int]) -> None:
+    """Отмечает ровно эти пункты (для Mini App, где выбор отправляется целиком)."""
+    items = await get_explore_items(session, user)
+    wanted = set(item_ids)
+    if len(wanted) != PRIORITIES_COUNT or not wanted <= {i.id for i in items}:
+        raise ValueError(f"Нужно выбрать ровно {PRIORITIES_COUNT} своих пункта")
+    for item in items:
+        item.selected = item.id in wanted
+    await session.flush()
+
+
 async def confirm_priorities(session: AsyncSession, user: User) -> list[Priority]:
     """Превращает ровно 3 отмеченных пункта в приоритеты и переводит на шаг Intent."""
     selected = [i for i in await get_explore_items(session, user) if i.selected]
@@ -135,6 +146,24 @@ async def save_intent(session: AsyncSession, user: User, text: str) -> Priority 
         user.onboarding_step = OnboardingStep.TACTICS
         user.onboarding_position = 1
     return priority
+
+
+async def set_intents(session: AsyncSession, user: User, intents: dict[int, str]) -> list[Priority]:
+    """Сохраняет «зачем» сразу для всех 3 приоритетов (Mini App) и переводит на шаг тактик."""
+    priorities = await get_priorities(session, user)
+    texts = {pid: text.strip() for pid, text in intents.items()}
+    if set(texts) != {p.id for p in priorities} or any(len(t) < MIN_INTENT_LEN for t in texts.values()):
+        raise ValueError("Нужно «зачем» для каждого приоритета")
+    for priority in priorities:
+        if priority.intent is None:
+            session.add(EssentialIntent(priority_id=priority.id, text=texts[priority.id]))
+        else:
+            priority.intent.text = texts[priority.id]
+    if user.onboarding_step == OnboardingStep.INTENT:
+        user.onboarding_step = OnboardingStep.TACTICS
+        user.onboarding_position = 1
+    await session.flush()
+    return await get_priorities(session, user)
 
 
 def is_measurable(text: str) -> bool:

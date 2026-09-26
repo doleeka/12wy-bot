@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.config import Settings
 from bot.models import OnboardingStep, User, WheelOfBalance
 from bot.services import cycle, wheel
+from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
 from webapp.auth import telegram_user
 
@@ -27,10 +28,24 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # До шага Eliminate колесо ещё можно переоценить
 WHEEL_EDITABLE_STEPS = {OnboardingStep.WHEEL, OnboardingStep.EXPLORE}
+# Список Explore можно дополнять и на шаге выбора (вернулась «дописать»)
+EXPLORE_EDITABLE_STEPS = {OnboardingStep.EXPLORE, OnboardingStep.ELIMINATE}
 
 
 class WheelIn(BaseModel):
     scores: dict[str, int]
+
+
+class ExploreIn(BaseModel):
+    text: str
+
+
+class EliminateIn(BaseModel):
+    selected: list[int]
+
+
+class IntentIn(BaseModel):
+    intents: dict[int, str]
 
 
 class ChatTarget:
@@ -117,17 +132,109 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         for key, value in scores.items():
             await wheel.save_score(session, user, key, value)
 
-        first_time = user.onboarding_step == OnboardingStep.WHEEL
         user.onboarding_step = OnboardingStep.EXPLORE
+        return wheel_payload(scores, await cycle.wheel_comparison(session, user))
+
+    # ---------- Explore / Eliminate ----------
+
+    async def explore_payload(session: AsyncSession, user: User) -> dict:
+        items = await svc.get_explore_items(session, user)
+        scores = await wheel.get_scores(session, user)
+        return {
+            "items": [{"id": i.id, "text": i.text, "selected": i.selected} for i in items],
+            "min": svc.MIN_EXPLORE_ITEMS,
+            "max": svc.MAX_EXPLORE_ITEMS,
+            "pick": svc.PRIORITIES_COUNT,
+            # подсказки: просадки колеса и прошлые приоритеты (в новом цикле)
+            "lows": [f"{s.emoji} {s.title}" for s, _ in wheel.low_spheres(scores)],
+            "previous": [p.title for p in await cycle.previous_priorities(session, user)],
+        }
+
+    def require_step(user: User, *steps: OnboardingStep) -> None:
+        if user.onboarding_step not in steps:
+            raise HTTPException(status_code=409, detail="wrong_step")
+
+    @app.get("/api/explore")
+    async def get_explore(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        return await explore_payload(session, user)
+
+    @app.post("/api/explore")
+    async def add_explore(
+        body: ExploreIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, *EXPLORE_EDITABLE_STEPS)
+        texts = svc.parse_explore_text(body.text)
+        if not texts:
+            raise HTTPException(status_code=422, detail="empty")
+        if len(await svc.get_explore_items(session, user)) >= svc.MAX_EXPLORE_ITEMS:
+            raise HTTPException(status_code=422, detail="limit")
+        added = await svc.add_explore_items(session, user, texts)
+        return await explore_payload(session, user) | {"added": added}
+
+    @app.delete("/api/explore/{item_id}")
+    async def delete_explore(item_id: int, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *EXPLORE_EDITABLE_STEPS)
+        await svc.delete_explore_item(session, user, item_id)
+        return await explore_payload(session, user)
+
+    @app.post("/api/explore/done")
+    async def explore_done(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *EXPLORE_EDITABLE_STEPS)
+        if len(await svc.get_explore_items(session, user)) < svc.MIN_EXPLORE_ITEMS:
+            raise HTTPException(status_code=422, detail="not_enough")
+        user.onboarding_step = OnboardingStep.ELIMINATE
+        return await explore_payload(session, user)
+
+    @app.put("/api/eliminate")
+    async def eliminate(
+        body: EliminateIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        # до сохранения «зачем» выбор ещё можно пересмотреть
+        require_step(user, OnboardingStep.ELIMINATE, OnboardingStep.INTENT)
+        try:
+            await svc.set_selection(session, user, body.selected)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="pick_exactly_3") from None
+        await svc.confirm_priorities(session, user)
+        return await intent_payload(session, user)
+
+    # ---------- Essential intent ----------
+
+    async def intent_payload(session: AsyncSession, user: User) -> dict:
+        priorities = await svc.get_priorities(session, user)
+        items = await svc.get_explore_items(session, user)
+        return {
+            "priorities": [
+                {"id": p.id, "position": p.position, "title": p.title, "intent": p.intent.text if p.intent else ""}
+                for p in priorities
+            ],
+            "not_now": [i.text for i in items if not i.selected],
+            "min_len": svc.MIN_INTENT_LEN,
+        }
+
+    @app.get("/api/intent")
+    async def get_intent(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        return await intent_payload(session, user)
+
+    @app.put("/api/intent")
+    async def save_intent(
+        body: IntentIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
+        first_time = user.onboarding_step == OnboardingStep.INTENT
+        try:
+            await svc.set_intents(session, user, body.intents)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="intent_required") from None
         if first_time and app.state.bot is not None:
-            # Следующие шаги пока идут в чате — сразу подсказываем, что дальше
+            # Тактики пока проходят в чате — передаём эстафету: бот пишет первый вопрос
             from bot.handlers.onboarding import send_step_prompt
 
             try:
                 await send_step_prompt(ChatTarget(app.state.bot, user.telegram_id), session, user)
-            except TelegramAPIError as e:  # заблокировала бота и т.п. — колесо всё равно сохранено
-                log.warning("Не удалось отправить подсказку Explore %s: %s", user.telegram_id, e)
-        return wheel_payload(scores, await cycle.wheel_comparison(session, user))
+            except TelegramAPIError as e:  # заблокировала бота и т.п. — «зачем» всё равно сохранены
+                log.warning("Не удалось отправить подсказку тактик %s: %s", user.telegram_id, e)
+        return await intent_payload(session, user)
 
     # ---------- фронтенд ----------
 

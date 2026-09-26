@@ -78,15 +78,65 @@
       <p class="muted">Это не оценка тебя — это карта. Просадки часто подсказывают, где сейчас живут самые важные изменения.</p>
       <div class="card accent">
         <b>Дальше — Explore 🔭</b>
-        <p class="muted">Этот шаг пока проходит в чате с ботом — я уже написала тебе. Скоро он переедет сюда.</p>
+        <p class="muted">Сначала расширяем, потом режем: выпишем всё, что для тебя сейчас важно.</p>
       </div>
       <button class="link" id="edit-wheel">Изменить оценки</button>
+    </section>
+
+    <!-- Explore -->
+    <section class="screen" id="screen-explore" hidden>
+      <p class="eyebrow">Шаг 2 · Explore</p>
+      <h1>Что для тебя важно прямо сейчас?</h1>
+      <p class="muted">Сейчас только расширяем. Цели, мечты, то, что давно откладываешь, то, что болит — без ограничений и без оценки «реально / нереально».</p>
+      <div class="card" id="explore-hints" hidden></div>
+      <form class="add-row" id="explore-form" autocomplete="off">
+        <textarea id="explore-input" rows="1" maxlength="1000" placeholder="Например: выучить английский" aria-label="Новый пункт"></textarea>
+        <button type="submit" class="add-btn" aria-label="Добавить">＋</button>
+      </form>
+      <p class="muted small">Можно вставить сразу список — каждый пункт с новой строки.</p>
+      <ul class="items" id="explore-list"></ul>
+      <p class="muted small" id="explore-count"></p>
+      <button class="link" id="show-wheel">Посмотреть моё колесо</button>
+    </section>
+
+    <!-- Eliminate -->
+    <section class="screen" id="screen-eliminate" hidden>
+      <p class="eyebrow">Шаг 3 · Eliminate</p>
+      <h1>Оставь ровно 3</h1>
+      <p class="muted">Самое сложное и самое важное: три приоритета на ближайшие 12 недель. Не 4 и не 5.</p>
+      <div class="card accent"><b>Если это не однозначное «да» — это «нет».</b>
+        <p class="muted">Остальное не исчезает — это осознанное «не сейчас».</p></div>
+      <p class="counter" id="eliminate-count"></p>
+      <div class="checks" id="eliminate-list"></div>
+      <button class="link" id="back-to-explore">← Дописать в список</button>
+    </section>
+
+    <!-- Essential intent -->
+    <section class="screen" id="screen-intent" hidden>
+      <p class="eyebrow">Шаг 4 · Essential intent</p>
+      <h1>Зачем тебе это?</h1>
+      <p class="muted">Не «надо», а <i>зачем</i>. Как каждый приоритет связан с тем, какой ты хочешь видеть свою жизнь — через год, через пять лет? На 5-й неделе, когда мотивация просядет, именно этот ответ удержит тебя.</p>
+      <details class="card" id="not-now" hidden><summary><b>Осознанное «не сейчас»</b></summary><ul></ul>
+        <p class="muted small">Это не провал — это место для главного.</p></details>
+      <div id="intent-list"></div>
+    </section>
+
+    <!-- Итог Explore → intent, дальше тактики в чате -->
+    <section class="screen" id="screen-intent-done" hidden>
+      <p class="eyebrow">Твои приоритеты</p>
+      <h1>Три главных на 12 недель</h1>
+      <div id="priorities-summary"></div>
+      <div class="card accent">
+        <b>Дальше — тактики ⚙️</b>
+        <p class="muted">Этот шаг пока проходит в чате с ботом — я уже написала тебе первый вопрос. Скоро здесь появится полный 12-недельный план.</p>
+      </div>
+      <button class="link" id="edit-intent">Изменить «зачем»</button>
     </section>
 
     <!-- Шаги, которые пока в чате -->
     <section class="screen" id="screen-later" hidden>
       <h1>Привет, <span data-name></span>!</h1>
-      <p>Твои следующие шаги пока проходят в чате с ботом.</p>
+      <p id="later-text">Твои следующие шаги пока проходят в чате с ботом.</p>
       <p class="muted">Скоро здесь появятся 12-недельный план, чек-ины с историей и твоя команда.</p>
     </section>
   </main>

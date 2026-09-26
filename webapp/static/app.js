@@ -4,7 +4,10 @@
 
   const tg = window.Telegram && window.Telegram.WebApp;
   const $ = (sel) => document.querySelector(sel);
-  const state = { me: null, wheel: null, scores: {}, touched: new Set(), extras: [] };
+  const state = {
+    me: null, wheel: null, scores: {}, touched: new Set(), extras: [],
+    explore: null, picked: new Set(), intent: null, drafts: {},
+  };
   let mainHandler = null;
   let backHandler = null;
 
@@ -308,7 +311,230 @@
         cmp.querySelector("ul").appendChild(li);
       });
     }
-    mainButton("Вернуться в чат", () => tg.close());
+    mainButton("Дальше: Explore", showExplore);
+  }
+
+  // ---------- Explore ----------
+
+  function autosize(ta) {
+    ta.style.height = "auto";
+    ta.style.height = ta.scrollHeight + "px";
+  }
+
+  function renderExplore() {
+    const d = state.explore;
+    const hints = [];
+    if (d.lows.length) hints.push("<b>Просадки колеса:</b> <span data-t='lows'></span>");
+    if (d.previous.length) hints.push("<b>Прошлые приоритеты:</b> <span data-t='prev'></span> — можно вписать снова, если это всё ещё однозначное «да».");
+    const box = $("#explore-hints");
+    box.hidden = !hints.length;
+    box.innerHTML = hints.map((h) => "<p>" + h + "</p>").join("");
+    if (d.lows.length) box.querySelector("[data-t=lows]").textContent = d.lows.join(", ");
+    if (d.previous.length) box.querySelector("[data-t=prev]").textContent = d.previous.join(", ");
+
+    const list = $("#explore-list");
+    list.innerHTML = "";
+    d.items.forEach((item) => {
+      const li = document.createElement("li");
+      li.innerHTML = "<span></span><button aria-label='Удалить'>×</button>";
+      li.querySelector("span").textContent = item.text;
+      li.querySelector("button").addEventListener("click", async () => {
+        try {
+          state.explore = await api("DELETE", "/api/explore/" + item.id);
+          haptic.tick();
+          renderExplore();
+        } catch (e) { failed(e); }
+      });
+      list.appendChild(li);
+    });
+    const n = d.items.length;
+    $("#explore-count").textContent = n ? "В списке: " + n : "";
+    const left = d.min - n;
+    mainButton(left > 0 ? "Добавь ещё " + left : "Дальше: выбрать " + d.pick, exploreDone, left <= 0);
+  }
+
+  async function addExplore(ev) {
+    ev.preventDefault();
+    const input = $("#explore-input");
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+      state.explore = await api("POST", "/api/explore", { text });
+      if (state.explore.added === 0) tg.showAlert("Это уже есть в списке 🙂");
+      input.value = "";
+      autosize(input);
+      haptic.tick();
+      renderExplore();
+    } catch (e) {
+      e.detail === "limit" ? tg.showAlert("В списке уже " + state.explore.max + " пунктов — это максимум. Пора выбирать 🙂") : failed(e);
+    }
+    input.focus();
+  }
+
+  async function showExplore() {
+    try {
+      state.explore = await api("GET", "/api/explore");
+    } catch (e) { return failed(e); }
+    show("screen-explore");
+    backButton(null);
+    renderExplore();
+  }
+
+  async function exploreDone() {
+    try {
+      state.explore = await api("POST", "/api/explore/done");
+      state.me.step = "eliminate";
+      showEliminate();
+    } catch (e) { failed(e); }
+  }
+
+  // ---------- Eliminate ----------
+
+  function renderEliminate() {
+    const d = state.explore;
+    const picked = state.picked;
+    const full = picked.size >= d.pick;
+    const list = $("#eliminate-list");
+    list.innerHTML = "";
+    d.items.forEach((item) => {
+      const on = picked.has(item.id);
+      const label = document.createElement("label");
+      label.className = "check" + (on ? " on" : full ? " off" : "");
+      label.innerHTML = "<input type='checkbox'><span></span>";
+      const box = label.querySelector("input");
+      box.checked = on;
+      box.disabled = !on && full; // после третьей остальные заблокированы
+      label.querySelector("span").textContent = item.text;
+      box.addEventListener("change", () => {
+        box.checked ? picked.add(item.id) : picked.delete(item.id);
+        haptic.tick();
+        renderEliminate();
+      });
+      list.appendChild(label);
+    });
+    $("#eliminate-count").textContent = "Выбрано " + picked.size + " из " + d.pick;
+    const left = d.pick - picked.size;
+    mainButton(left ? "Выбери ещё " + left : "Оставить эти " + d.pick, confirmEliminate, left === 0);
+  }
+
+  async function showEliminate() {
+    if (!state.explore) {
+      try { state.explore = await api("GET", "/api/explore"); } catch (e) { return failed(e); }
+    }
+    state.picked = new Set(state.explore.items.filter((i) => i.selected).map((i) => i.id));
+    show("screen-eliminate");
+    backButton(showExplore);
+    renderEliminate();
+  }
+
+  async function confirmEliminate() {
+    tg.MainButton.showProgress();
+    try {
+      state.intent = await api("PUT", "/api/eliminate", { selected: Array.from(state.picked) });
+      state.me.step = "intent";
+      haptic.ok();
+      showIntent();
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
+  }
+
+  // ---------- Essential intent ----------
+
+  function intentReady() {
+    return state.intent.priorities.every((p) => (state.drafts[p.title] || "").trim().length >= state.intent.min_len);
+  }
+
+  function refreshIntentButton() {
+    const left = state.intent.priorities.filter((p) => (state.drafts[p.title] || "").trim().length < state.intent.min_len).length;
+    mainButton(left ? "Ответь ещё на " + left : "Сохранить «зачем»", saveIntent, left === 0);
+  }
+
+  function renderIntent() {
+    const d = state.intent;
+    const notNow = $("#not-now");
+    notNow.hidden = !d.not_now.length;
+    const ul = notNow.querySelector("ul");
+    ul.innerHTML = "";
+    d.not_now.forEach((t) => { const li = document.createElement("li"); li.textContent = t; ul.appendChild(li); });
+
+    const list = $("#intent-list");
+    list.innerHTML = "";
+    d.priorities.forEach((p) => {
+      if (state.drafts[p.title] == null) state.drafts[p.title] = p.intent || "";
+      const wrap = document.createElement("div");
+      wrap.className = "intent";
+      wrap.innerHTML = "<label></label><textarea maxlength='2000'></textarea><div class='hint'></div>";
+      const id = "intent-" + p.id;
+      wrap.querySelector("label").textContent = p.position + ". " + p.title;
+      wrap.querySelector("label").setAttribute("for", id);
+      const ta = wrap.querySelector("textarea");
+      ta.id = id;
+      ta.placeholder = "Почему это для тебя важно? Что изменится, когда получится?";
+      ta.value = state.drafts[p.title];
+      const hint = wrap.querySelector(".hint");
+      const update = () => {
+        const left = d.min_len - ta.value.trim().length;
+        hint.textContent = left > 0 ? "Ещё " + left + " симв. — чуть подробнее, чем «надо»" : "✓ Принято";
+        hint.classList.toggle("ok", left <= 0);
+      };
+      ta.addEventListener("input", () => {
+        state.drafts[p.title] = ta.value;
+        update();
+        refreshIntentButton();
+      });
+      update();
+      list.appendChild(wrap);
+    });
+    refreshIntentButton();
+  }
+
+  async function showIntent() {
+    if (!state.intent) {
+      try { state.intent = await api("GET", "/api/intent"); } catch (e) { return failed(e); }
+    }
+    show("screen-intent");
+    // пока «зачем» не сохранены, выбор трёх можно пересмотреть
+    backButton(state.me.step === "intent" ? showEliminate : showIntentDone);
+    renderIntent();
+  }
+
+  async function saveIntent() {
+    if (!intentReady()) return;
+    const intents = {};
+    state.intent.priorities.forEach((p) => (intents[p.id] = state.drafts[p.title].trim()));
+    tg.MainButton.showProgress();
+    try {
+      state.intent = await api("PUT", "/api/intent", { intents });
+      state.me.step = "tactics";
+      haptic.ok();
+      showIntentDone();
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
+  }
+
+  function showIntentDone() {
+    show("screen-intent-done");
+    backButton(null);
+    const box = $("#priorities-summary");
+    box.innerHTML = "";
+    state.intent.priorities.forEach((p) => {
+      const card = document.createElement("div");
+      card.className = "card priority";
+      card.innerHTML = "<b></b><p></p>";
+      card.querySelector("b").textContent = p.position + ". " + p.title;
+      card.querySelector("p").textContent = "Зачем: " + p.intent;
+      box.appendChild(card);
+    });
+    mainButton("Перейти в чат к тактикам", () => tg.close());
+  }
+
+  function failed(e) {
+    haptic.err();
+    const messages = {
+      wrong_step: "Этот шаг уже пройден — открой приложение заново.",
+      not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
+      pick_exactly_3: "Нужно выбрать ровно 3.",
+      intent_required: "Нужно «зачем» для каждого приоритета — хотя бы пару предложений.",
+    };
+    tg.showAlert(messages[e.detail] || "Не получилось. Проверь интернет и попробуй ещё раз.");
   }
 
   // ---------- старт ----------
@@ -323,17 +549,36 @@
     applyTheme();
     tg.onEvent("themeChanged", applyTheme);
     $("#edit-wheel").addEventListener("click", showWheel);
+    $("#show-wheel").addEventListener("click", async () => {
+      try { loadWheelState(await api("GET", "/api/wheel")); } catch (e) { return failed(e); }
+      showWheelDone();
+    });
+    $("#explore-form").addEventListener("submit", addExplore);
+    const input = $("#explore-input");
+    input.addEventListener("input", () => autosize(input));
+    // Enter — добавить; Shift+Enter — новая строка (для вставки списка)
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) addExplore(ev);
+    });
+    $("#back-to-explore").addEventListener("click", showExplore);
+    $("#edit-intent").addEventListener("click", showIntent);
     try {
       state.me = await api("GET", "/api/me");
       document.querySelectorAll("[data-name]").forEach((n) => (n.textContent = state.me.first_name || ""));
-      if (state.me.step === "wheel" || state.me.step === "explore") {
+      const step = state.me.step;
+      if (step === "wheel" || step === "explore") {
         loadWheelState(await api("GET", "/api/wheel"));
       }
-      if (state.me.step === "wheel") {
+      if (step === "wheel") {
         Object.keys(state.wheel.scores).length ? showWheel() : showWelcome();
-      } else if (state.me.step === "explore") {
-        showWheelDone();
+      } else if (step === "explore") {
+        showExplore();
+      } else if (step === "eliminate") {
+        showEliminate();
+      } else if (step === "intent") {
+        showIntent();
       } else {
+        if (step === "tactics") $("#later-text").textContent = "Сейчас — тактики: этот шаг пока проходит в чате с ботом.";
         show("screen-later");
         backButton(null);
         mainButton("Вернуться в чат", () => tg.close());

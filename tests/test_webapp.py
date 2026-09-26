@@ -66,12 +66,11 @@ async def test_wheel_flow(api, sessionmaker):
     async with sessionmaker() as session:
         user = await teams.get_user_by_telegram_id(session, 42)
         assert user.onboarding_step == OnboardingStep.EXPLORE
-    assert "Explore" in api.tg.sent(42)[0]  # следующий шаг — в чат
+    assert api.tg.sent(42) == []  # Explore теперь в приложении — в чат не пишем
 
-    # до Eliminate можно переоценить и снять доп. сферу; подсказка в чат второй раз не приходит
+    # до Eliminate можно переоценить и снять доп. сферу
     r = await api.put("/api/wheel", headers=auth(), json={"scores": CORE | {"health": 9}})
     assert r.json()["scores"] == CORE | {"health": 9}
-    assert len(api.tg.sent(42)) == 1
 
 
 @pytest.mark.parametrize(

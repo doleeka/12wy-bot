@@ -100,3 +100,41 @@ p { margin: 0 0 12px; }
 .card ul { margin: 6px 0 0; padding-left: 18px; }
 .delta-up { color: var(--text); }
 .link { border: 0; background: none; color: var(--link); font: inherit; padding: 8px 0; cursor: pointer; }
+
+/* ---------- Explore / Eliminate / intent ---------- */
+.add-row { display: flex; gap: 8px; align-items: flex-end; margin: 12px 0 4px; }
+.add-row textarea, .intent textarea {
+  flex: 1; font: inherit; color: var(--text); background: var(--bg-2); border: 1px solid transparent;
+  border-radius: 12px; padding: 10px 12px; resize: none; outline: none; min-height: 44px;
+}
+.add-row textarea:focus, .intent textarea:focus { border-color: var(--accent); }
+.add-btn {
+  width: 44px; height: 44px; flex: none; border: 0; border-radius: 12px; font-size: 22px; cursor: pointer;
+  background: var(--accent); color: var(--accent-text);
+}
+.items { list-style: none; padding: 0; margin: 12px 0 4px; display: grid; gap: 6px; }
+.items li {
+  display: flex; align-items: center; gap: 8px; background: var(--bg-2); border-radius: 12px; padding: 10px 6px 10px 12px;
+}
+.items li span { flex: 1; overflow-wrap: anywhere; }
+.items li button { border: 0; background: none; color: var(--hint); font-size: 20px; width: 36px; height: 32px; cursor: pointer; }
+.counter { font-weight: 600; margin: 16px 0 8px; }
+.checks { display: grid; gap: 6px; }
+.check {
+  display: flex; align-items: center; gap: 12px; background: var(--bg-2); border-radius: 12px; padding: 12px;
+  border: 2px solid transparent; cursor: pointer;
+}
+.check.on { border-color: var(--accent); }
+.check.off { opacity: .45; cursor: default; }
+.check input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; margin: 0; }
+.check span { overflow-wrap: anywhere; }
+details.card summary { cursor: pointer; }
+details.card ul { margin: 8px 0 4px; padding-left: 18px; color: var(--hint); }
+.intent { margin: 0 0 16px; }
+.intent label { display: block; font-weight: 600; margin-bottom: 6px; }
+.intent textarea { width: 100%; min-height: 96px; }
+.intent .hint { font-size: 13px; color: var(--hint); margin-top: 4px; }
+.intent .hint.ok { color: var(--text); }
+.priority { margin: 0 0 10px; }
+.priority b { display: block; }
+.priority p { color: var(--hint); margin: 2px 0 0; overflow-wrap: anywhere; }
