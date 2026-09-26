@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Checkin, DailyMark, User, WeeklyTactic
@@ -46,12 +47,13 @@ def week_state(tactic: WeeklyTactic, week: date, checkin: dict[int, bool], daily
 
 
 async def set_daily(session: AsyncSession, user: User, tactic: WeeklyTactic, day: date, done: bool) -> None:
-    existing = await session.scalar(select(DailyMark).where(DailyMark.tactic_id == tactic.id, DailyMark.day == day))
-    if done and existing is None:
-        session.add(DailyMark(user_id=user.id, tactic_id=tactic.id, day=day))
-    elif not done and existing is not None:
-        await session.delete(existing)
-    await session.flush()
+    # идемпотентно: повторный или одновременный запрос (двойное нажатие) не падает на UNIQUE
+    if done:
+        await session.execute(
+            insert(DailyMark).values(user_id=user.id, tactic_id=tactic.id, day=day).on_conflict_do_nothing()
+        )
+    else:
+        await session.execute(delete(DailyMark).where(DailyMark.tactic_id == tactic.id, DailyMark.day == day))
 
 
 async def clear_week_mark(session: AsyncSession, user: User, tactic_id: int, week: date) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,7 +32,11 @@ async def tactics_for_week(session: AsyncSession, user: User, week: date) -> lis
 
 
 async def get_marks(session: AsyncSession, user: User, week: date) -> dict[int, bool]:
-    rows = await session.scalars(select(Checkin).where(Checkin.user_id == user.id, Checkin.week_start == week))
+    rows = await session.scalars(
+        select(Checkin)
+        .where(Checkin.user_id == user.id, Checkin.week_start == week)
+        .execution_options(populate_existing=True)  # set_mark пишет мимо ORM
+    )
     return {row.tactic_id: row.done for row in rows}
 
 
@@ -68,20 +73,12 @@ async def set_mark(session: AsyncSession, user: User, tactic_id: int, week: date
     tactic = await session.get(WeeklyTactic, tactic_id)
     if tactic is None or tactic.user_id != user.id or not tactic.is_active:
         return False
-    row = await session.scalar(select(Checkin).where(Checkin.tactic_id == tactic_id, Checkin.week_start == week))
-    if row is None:
-        session.add(
-            Checkin(
-                user_id=user.id,
-                tactic_id=tactic_id,
-                week_start=week,
-                week_number=checkin_week_number(user, week),
-                done=done,
-            )
-        )
-    else:
-        row.done = done
-    await session.flush()
+    # upsert, а не «прочитать → вставить»: двойное нажатие шлёт два запроса сразу, второй не должен падать на UNIQUE
+    await session.execute(
+        insert(Checkin)
+        .values(user_id=user.id, tactic_id=tactic_id, week_start=week, week_number=checkin_week_number(user, week), done=done)
+        .on_conflict_do_update(index_elements=[Checkin.tactic_id, Checkin.week_start], set_={"done": done})
+    )
     return True
 
 

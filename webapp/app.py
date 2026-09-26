@@ -521,6 +521,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         daily = await today_svc.daily_marks(session, user, week)
         states = {t.id: today_svc.week_state(t, week, checkin, daily) for t in week_tactics}
         done = sum(1 for v in states.values() if v)
+        checked = week_checked(user, week)
         return base | {
             "status": "active",
             "week_number": n,
@@ -528,18 +529,28 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "week_end": (week + timedelta(days=6)).isoformat(),
             # сегодня: еженедельные действия в свои дни — галочка «сделано сегодня»
             "today_items": [
-                item(t, done=today in daily.get(t.id, set()))
+                item(t, done=today in daily.get(t.id, set()), week_done=states[t.id])
                 for t in today_svc.scheduled_on(week_tactics, today)
             ],
             # на этой неделе: разовые, контрольные точки и еженедельные без дней — отметка за неделю
-            "week_items": [item(t, done=checkin.get(t.id)) for t in week_tactics if not today_svc.is_daily(t)],
+            "week_items": [
+                item(t, done=checkin.get(t.id), week_done=states[t.id]) for t in week_tactics if not today_svc.is_daily(t)
+            ],
             "week_progress": {
                 "done": done,
                 "planned": len(week_tactics),
                 "percent": scorecard.percent(done, len(week_tactics)),
             },
-            "checkin_done": bool(week_tactics) and all(t.id in checkin for t in week_tactics),
+            # чек-ин сохранён (здесь или в чате) — итог недели зафиксирован, отметки меняются только через чек-ин
+            "checkin_done": checked,
         }
+
+    def week_checked(user: User, week: date) -> bool:
+        return user.last_reported_week is not None and user.last_reported_week >= week
+
+    def require_open_week(user: User, week: date) -> None:
+        if week_checked(user, week):
+            raise HTTPException(status_code=409, detail="week_checked")
 
     @app.post("/api/today/daily")
     async def mark_daily(body: DailyIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
@@ -549,6 +560,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         n = scorecard.week_number(user.cycle_start, today)
         if n is None or not tactic.in_week(n) or not today_svc.scheduled_on([tactic], today):
             raise HTTPException(status_code=422, detail="not_today")
+        require_open_week(user, scorecard.week_start(today))
         await today_svc.set_daily(session, user, tactic, today, body.done)
         return await get_today(user, session)
 
@@ -560,6 +572,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         tactic = await own_tactic(session, user, body.tactic_id)
         if tactic.id not in {t.id for t in await checkins.tactics_for_week(session, user, week)}:
             raise HTTPException(status_code=422, detail="not_this_week")
+        require_open_week(user, week)
         if body.done is None:
             await today_svc.clear_week_mark(session, user, tactic.id, week)
         else:

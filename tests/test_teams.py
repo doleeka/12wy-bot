@@ -93,8 +93,8 @@ def test_week_helpers():
     assert scorecard.week_number(start, start + timedelta(days=7 * 11 + 6)) == 12
     assert scorecard.week_number(start, start + timedelta(days=7 * 12)) is None
     assert scorecard.percent(3, 4) == 75 and scorecard.percent(0, 0) is None
-    assert scorecard.rating(85) == "отлично" and scorecard.rating(70).startswith("хорошо")
-    assert scorecard.rating(69) == "сбой в исполнении"
+    assert scorecard.rating(85) == "по плану" and scorecard.rating(70) == "почти по плану"
+    assert scorecard.rating(69) == "стоит пересмотреть план"
 
 
 # ---------- хендлеры ----------

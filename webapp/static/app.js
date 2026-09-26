@@ -1099,10 +1099,11 @@
 
   // ---------- Главная в цикле: неделя, средний %, график по неделям ----------
 
+  // ориентиры, а не оценка человека
   const STATUS = {
-    good: { icon: "🟢", label: "отлично" },
-    warning: { icon: "🟡", label: "хорошо, есть что подтянуть" },
-    critical: { icon: "🔴", label: "сбой — разберись, что помешало" },
+    good: { icon: "🟢", label: "по плану", short: "по плану" },
+    warning: { icon: "🟡", label: "почти по плану", short: "почти" },
+    critical: { icon: "🔴", label: "стоит пересмотреть план", short: "пересмотреть" },
   };
 
   function period(startIso, endIso) {
@@ -1185,6 +1186,20 @@
     row.setAttribute("role", "checkbox");
     row.setAttribute("aria-checked", String(!!checked));
     const box = el2("span", "box", "✓");
+    return fillRow(row, box, t, onToggle, meta);
+  }
+
+  // Неделя уже отмечена в чек-ине: показываем её итог (✓ / ✕ + текст), нажатие открывает «Изменить отметки»
+  function lockedRow(t) {
+    const done = t.week_done === true;
+    const row = el2("button", "task locked " + (done ? "done" : "missed"));
+    row.type = "button";
+    row.setAttribute("aria-label", t.text + " — по чек-ину " + (done ? "сделано" : "не сделано") + ". Изменить отметки");
+    const box = el2("span", "box", done ? "✓" : "✕");
+    return fillRow(row, box, t, openCheckin, "по чек-ину: " + (done ? "сделано" : "не сделано"));
+  }
+
+  function fillRow(row, box, t, onToggle, meta) {
     const main = el2("span", "t-main");
     main.appendChild(el2("span", "t-text", t.text));
     const m = el2("span", "t-meta");
@@ -1232,21 +1247,29 @@
     $("#today-day").textContent = "Сегодня, " + WEEKDAY_NAMES[d.weekday];
     const list = $("#today-list");
     list.innerHTML = "";
-    d.today_items.forEach((t) => list.appendChild(taskRow(t, t.done, () => toggleDaily(t), t.priority_title)));
+    const locked = d.checkin_done;
+    d.today_items.forEach((t) => list.appendChild(locked ? lockedRow(t) : taskRow(t, t.done, () => toggleDaily(t), t.priority_title)));
     $("#today-empty").hidden = d.today_items.length > 0;
     const wl = $("#week-list");
     wl.innerHTML = "";
-    d.week_items.forEach((t) => wl.appendChild(taskRow(t, t.done === true, () => toggleWeek(t), t.label)));
+    d.week_items.forEach((t) => wl.appendChild(locked ? lockedRow(t) : taskRow(t, t.done === true, () => toggleWeek(t), t.label)));
     $("#week-empty").hidden = d.week_items.length > 0;
 
     const wp = d.week_progress;
+    // неделя без действий по плану — буфер: не «0 из 0», а объяснение
+    $("#today-list-block").hidden = !wp.planned;
+    $("#today-buffer").hidden = !!wp.planned;
+    $("#week-progress-card").hidden = !wp.planned;
+    $("#checkin-card").hidden = !wp.planned;
+    $("#today-locked").hidden = !(locked && wp.planned);
+    $("#today-locked").textContent = "Неделя сохранена: " + wp.percent + "%. Изменить ответы можно в чек-ине — нажми на действие или «Изменить отметки».";
     $("#week-progress-text").textContent = "На этой неделе: " + wp.done + " из " + wp.planned + " выполнено";
     $("#week-progress-pct").textContent = wp.percent != null ? wp.percent + "%" : "";
     $("#week-progress-fill").style.width = (wp.percent || 0) + "%";
     const sunday = d.weekday === 6;
     $("#checkin-card-title").textContent = d.checkin_done ? "Чек-ин недели сделан ✓" : sunday ? "Сегодня — чек-ин недели" : "Чек-ин недели — в воскресенье";
     $("#checkin-card-text").textContent = d.checkin_done
-      ? "Можно исправить отметки до конца недели."
+      ? "Итог недели — " + wp.percent + "%."
       : "Отметь по каждому действию: получилось или нет. Галочки выше уже подставлены.";
     $("#today-checkin").textContent = d.checkin_done ? "Изменить отметки" : "Отметить неделю " + d.week_number;
     $("#today-checkin").hidden = !wp.planned;
@@ -1258,15 +1281,18 @@
     return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
   }
 
-  async function toggleDaily(t) {
+  // Пока отметка сохраняется, повторные нажатия игнорируем — иначе второе уйдёт со старым состоянием
+  let marking = false;
+  async function mark(path, body) {
+    if (marking) return;
+    marking = true;
     haptic.tick();
-    try { renderToday(await api("POST", "/api/today/daily", { tactic_id: t.id, done: !t.done })); } catch (e) { failed(e); }
+    try { renderToday(await api("POST", path, body)); }
+    catch (e) { failed(e); if (e.status === 409 || e.status === 422) showToday(); } // неделя уже отмечена / действие не на сегодня — обновим экран
+    finally { marking = false; }
   }
-
-  async function toggleWeek(t) {
-    haptic.tick();
-    try { renderToday(await api("POST", "/api/today/week", { tactic_id: t.id, done: t.done === true ? null : true })); } catch (e) { failed(e); }
-  }
+  const toggleDaily = (t) => mark("/api/today/daily", { tactic_id: t.id, done: !t.done });
+  const toggleWeek = (t) => mark("/api/today/week", { tactic_id: t.id, done: t.done === true ? null : true });
 
   async function showToday() {
     let d;
@@ -1317,7 +1343,7 @@
       const row = el2("div", "h-row");
       row.append(el2("span", "h-week", "Неделя " + w.n), el2("span", "h-dates", period(w.week_start, addDays(w.week_start, 6))));
       const val = el2("span", "h-val", w.percent != null ? w.percent + "%" : "—");
-      val.appendChild(el2("small", null, w.percent != null ? STATUS[w.level].icon + " " + STATUS[w.level].label.split(",")[0].split(" —")[0] : w.planned ? "не отмечена" : "буфер"));
+      val.appendChild(el2("small", null, w.percent != null ? STATUS[w.level].icon + " " + STATUS[w.level].short : w.planned ? "не отмечена" : "буфер"));
       row.appendChild(val);
       hist.appendChild(row);
     });
@@ -1391,7 +1417,10 @@
     renderCheckin();
   }
 
+  let savingCheckin = false;
   async function saveCheckin() {
+    if (savingCheckin) return; // двойное нажатие на кнопку Telegram
+    savingCheckin = true;
     const ci = state.checkin;
     tg.MainButton.showProgress();
     try {
@@ -1406,8 +1435,8 @@
       $("#result-rating").textContent = STATUS[res.level].icon + " " + res.rating;
       $("#result-count").textContent = "Выполнено " + res.done + " из " + res.planned;
       $("#result-advice").textContent = res.advice;
-      mainButton("На главную", showHome);
-    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
+      mainButton("К сегодняшним действиям", showHome);
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); savingCheckin = false; }
   }
 
   function failed(e) {
@@ -1427,6 +1456,10 @@
       bad_weeks: "Выбери хотя бы одну неделю.",
       pick_days: "Выбери хотя бы один день недели.",
       bad_days: "Выбери хотя бы один день недели.",
+      no_tactics: "На этой неделе по плану нет действий — отмечать нечего.",
+      not_today: "Это действие не на сегодня — обновила список.",
+      not_this_week: "Это действие не на этой неделе — обновила список.",
+      week_checked: "Неделя уже отмечена в чек-ине — исправить можно через «Изменить отметки».",
     };
     tg.showAlert(messages[e.detail] || "Не получилось. Проверь интернет и попробуй ещё раз.");
   }

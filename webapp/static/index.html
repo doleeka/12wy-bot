@@ -227,6 +227,12 @@
 
       <!-- во время цикла -->
       <div id="today-active" hidden>
+        <div class="card note-card" id="today-locked" hidden></div>
+        <div class="card empty-card" id="today-buffer" hidden>
+          <b>Эта неделя — буфер</b>
+          <p class="muted">По плану на этой неделе действий нет, чек-ин не нужен. Отдохни или доделай то, что не успела раньше.</p>
+        </div>
+        <div id="today-list-block">
         <h2 id="today-day"></h2>
         <div class="tasks" id="today-list"></div>
         <p class="muted" id="today-empty" hidden>На сегодня по плану ничего нет — отдохни или загляни в действия недели 🌿</p>
@@ -234,13 +240,14 @@
         <h2>На этой неделе</h2>
         <div class="tasks" id="week-list"></div>
         <p class="muted small" id="week-empty" hidden>Разовых действий на этой неделе нет.</p>
+        </div>
 
-        <div class="card progress-card">
+        <div class="card progress-card" id="week-progress-card">
           <div class="pc-head"><b id="week-progress-text"></b><span id="week-progress-pct"></span></div>
           <div class="ob-bar"><i id="week-progress-fill"></i></div>
           <p class="pc-note">Действие засчитывается, когда отмечены все его дни на этой неделе. Итоговый % недели — по чек-ину.</p>
         </div>
-        <div class="card checkin-card">
+        <div class="card checkin-card" id="checkin-card">
           <b id="checkin-card-title"></b>
           <p class="muted" id="checkin-card-text"></p>
           <button class="btn" id="today-checkin">Отметить неделю</button>
@@ -270,9 +277,9 @@
         <svg id="score-chart" viewBox="0 0 360 190" role="img"></svg>
         <div class="tooltip" id="score-tip" hidden></div>
         <figcaption class="legend status-legend">
-          <span><i class="sq good"></i>85%+ отлично</span>
-          <span><i class="sq warning"></i>70–84% хорошо</span>
-          <span><i class="sq critical"></i>&lt;70% сбой</span>
+          <span><i class="sq good"></i>85%+ по плану</span>
+          <span><i class="sq warning"></i>70–84% почти по плану</span>
+          <span><i class="sq critical"></i>&lt;70% пересмотреть план</span>
         </figcaption>
       </figure>
       <p class="muted small">Это ориентиры, а не оценка тебя: неделя ниже 70% — повод посмотреть, что помешало.</p>

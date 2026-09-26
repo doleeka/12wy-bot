@@ -98,7 +98,7 @@ async def test_full_checkin_and_team_report(sessionmaker):
     assert flow.msg.edit_text.call_args.args[0].count("— ✅") == 3
     await flow.press(cbs[-1])
     result = flow.msg.edit_text.call_args.args[0]
-    assert "75%" in result and "хорошо" in result and "Выполнено 3 из 4" in result
+    assert "75%" in result and "почти по плану" in result and "Выполнено 3 из 4" in result
     report = flow.bot.send_message.call_args_list
     assert [c.args[0] for c in report] == [2]
     assert "U1" in report[0].args[1] and "75%" in report[0].args[1] and "тактика" not in report[0].args[1]
@@ -122,7 +122,7 @@ async def test_low_score_advice_and_admin_report(sessionmaker):
     await flow.press(cbs[3])  # ❌
     await flow.press(cbs[-1])
     result = flow.msg.edit_text.call_args.args[0]
-    assert "50%" in result and "сбой" in result and "Что помешало" in result and "буфер" in result
+    assert "50%" in result and "пересмотреть план" in result and "Что помешало" in result and "буфер" in result
     assert [c.args[0] for c in flow.bot.send_message.call_args_list] == [ADMIN_ID]
 
 

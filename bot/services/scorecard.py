@@ -30,11 +30,12 @@ def percent(done: int, planned: int) -> int | None:
 
 
 def rating(value: int) -> str:
+    # ориентиры, а не оценка человека (brief: статусы — не моральная оценка)
     if value >= EXCELLENT:
-        return "отлично"
+        return "по плану"
     if value >= GOOD:
-        return "хорошо, есть что подтянуть"
-    return "сбой в исполнении"
+        return "почти по плану"
+    return "стоит пересмотреть план"
 
 
 def level(value: int) -> str:
