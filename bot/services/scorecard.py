@@ -37,6 +37,15 @@ def rating(value: int) -> str:
     return "сбой в исполнении"
 
 
+def level(value: int) -> str:
+    """good / warning / critical — для цвета и значка в приложении."""
+    if value >= EXCELLENT:
+        return "good"
+    if value >= GOOD:
+        return "warning"
+    return "critical"
+
+
 def rating_emoji(value: int | None) -> str:
     if value is None:
         return "▫️"

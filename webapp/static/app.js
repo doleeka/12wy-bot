@@ -6,7 +6,7 @@
   const $ = (sel) => document.querySelector(sel);
   const state = {
     me: null, wheel: null, scores: {}, touched: new Set(), extras: [],
-    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null,
+    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null, checkin: null, marks: {},
   };
   let mainHandler = null;
   let backHandler = null;
@@ -739,8 +739,8 @@
       backButton(showTactics);
       mainButton("Подтвердить план", confirmPlan);
     } else {
-      backButton(null);
-      mainButton("Вернуться в чат", () => tg.close());
+      backButton(showHome);
+      mainButton("На главную", showHome);
     }
   }
 
@@ -754,7 +754,188 @@
       backButton(null);
       $("#ready-start").textContent = "Неделя 1 из 12 начинается в понедельник, " + formatDate(state.plan.cycle_start) + ".";
       $("#ready-team").textContent = state.plan.team ? "Твоя команда — " + state.plan.team + " 🤝 Подробности я написала в чат." : "";
-      mainButton("Посмотреть план", () => showPlan("view"));
+      mainButton("На главную", showHome);
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
+  }
+
+  // ---------- Главная в цикле: неделя, средний %, график по неделям ----------
+
+  const STATUS = {
+    good: { icon: "🟢", label: "отлично" },
+    warning: { icon: "🟡", label: "хорошо, есть что подтянуть" },
+    critical: { icon: "🔴", label: "сбой — разберись, что помешало" },
+  };
+
+  function period(startIso, endIso) {
+    const [, m1, d1] = startIso.split("-").map(Number);
+    const [, m2, d2] = endIso.split("-").map(Number);
+    return m1 === m2 ? d1 + "–" + d2 + " " + MONTHS[m2 - 1] : d1 + " " + MONTHS[m1 - 1] + " – " + d2 + " " + MONTHS[m2 - 1];
+  }
+
+  function daysUntil(iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+  }
+
+  // Столбики по 12 неделям: высота — %, цвет — статус (со значком и подписью в подсказке и легенде)
+  function drawScoreChart(svg, sc, tip) {
+    svg.innerHTML = "";
+    const X0 = 30, X1 = 352, Y0 = 14, Y1 = 158;
+    const y = (v) => Y1 - ((Y1 - Y0) * v) / 100;
+    const step = (X1 - X0) / 12;
+    const bw = step * 0.62;
+    [0, 50, 100].forEach((v) => {
+      el("line", { class: "gridline", x1: X0, x2: X1, y1: y(v), y2: y(v) }, svg);
+      el("text", { class: "axis-label", x: X0 - 6, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = v;
+    });
+    [[sc.thresholds.good, "85"], [sc.thresholds.warning, "70"]].forEach(([v, label]) => {
+      el("line", { class: "threshold", x1: X0, x2: X1, y1: y(v), y2: y(v) }, svg);
+      el("text", { class: "thr-label", x: X1 + 2, y: y(v) + 3 }, svg).textContent = label;
+    });
+    sc.weeks.forEach((w, i) => {
+      const cx = X0 + step * i + step / 2;
+      const x = cx - bw / 2;
+      el("text", { class: "axis-label" + (w.n === sc.current_week ? " now" : ""), x: cx, y: Y1 + 16, "text-anchor": "middle" }, svg).textContent = w.n;
+      let text;
+      if (w.percent != null) {
+        const h = Math.max(Y1 - y(w.percent), 3);
+        el("rect", { class: "bar " + w.level, x, y: Y1 - h, width: bw, height: h, rx: 3 }, svg);
+        text = "Неделя " + w.n + ": " + w.percent + "% " + STATUS[w.level].icon + " " + STATUS[w.level].label;
+      } else if (w.future) {
+        el("rect", { class: "slot", x, y: y(100), width: bw, height: Y1 - y(100), rx: 3 }, svg);
+        text = "Неделя " + w.n + ": впереди · тактик по плану: " + w.planned;
+      } else {
+        el("rect", { class: "missed", x, y: Y1 - 3, width: bw, height: 3, rx: 1.5 }, svg);
+        text = "Неделя " + w.n + ": " + (w.planned ? "не отмечена" : "буфер — тактик не было");
+      }
+      const hit = el("rect", { x: cx - step / 2, y: Y0, width: step, height: Y1 - Y0 + 20, fill: "transparent" }, svg);
+      const showTip = () => {
+        const box = svg.getBoundingClientRect();
+        tip.textContent = text;
+        tip.style.left = Math.min(Math.max((cx / 360) * box.width, 90), box.width - 90) + "px";
+        tip.style.top = (((w.percent != null ? y(w.percent) : Y1)) / 190) * box.height + "px";
+        tip.hidden = false;
+      };
+      hit.addEventListener("pointerenter", showTip);
+      hit.addEventListener("pointerdown", showTip);
+      hit.addEventListener("pointerleave", () => (tip.hidden = true));
+    });
+    svg.setAttribute("aria-label", sc.weeks.map((w) => "неделя " + w.n + ": " + (w.percent != null ? w.percent + "%" : "—")).join(", "));
+  }
+
+  async function showHome() {
+    let sc, ci;
+    try {
+      [sc, ci] = await Promise.all([api("GET", "/api/scorecard"), api("GET", "/api/checkin")]);
+    } catch (e) { return failed(e); }
+    state.checkin = ci;
+    show("screen-home");
+    backButton(null);
+    if (ci.status === "not_started") {
+      const days = daysUntil(ci.cycle_start);
+      $("#home-title").textContent = "Старт — " + formatDate(ci.cycle_start);
+      $("#home-sub").textContent = days > 0 ? "До начала 12 недель: " + days + " дн. Первый чек-ин — в конце первой недели." : "";
+      $("#home-week-label").textContent = "Неделя 1";
+      $("#home-week").textContent = "—";
+      $("#home-week-note").textContent = "ещё не началась";
+    } else if (ci.status === "active") {
+      $("#home-title").textContent = "Неделя " + ci.week_number + " из 12";
+      $("#home-sub").textContent = period(ci.week_start, ci.week_end);
+      $("#home-week-label").textContent = "Неделя " + ci.week_number;
+      $("#home-week").textContent = ci.result ? ci.result.percent + "%" : "—";
+      $("#home-week-note").textContent = ci.result ? STATUS[ci.result.level].icon + " " + STATUS[ci.result.level].label : ci.tactics.length ? "ещё не отмечена" : "буфер 🌿";
+    } else {
+      $("#home-title").textContent = "12 недель позади 🎉";
+      $("#home-sub").textContent = "Итоги и старт нового цикла — в чате с ботом.";
+    }
+    $("#home-avg").textContent = sc.average != null ? sc.average + "%" : "—";
+    $("#home-avg-note").textContent = sc.average_level ? STATUS[sc.average_level].icon + " " + STATUS[sc.average_level].label : "появится после первого чек-ина";
+    drawScoreChart($("#score-chart"), sc, $("#score-tip"));
+
+    if (ci.status === "active" && ci.tactics.length) {
+      mainButton(ci.result ? "Изменить отметки" : "Отметить неделю " + ci.week_number, showCheckin);
+    } else if (ci.status === "not_started") {
+      mainButton("Мой план", openPlanView);
+    } else {
+      mainButton("Вернуться в чат", () => tg.close());
+    }
+  }
+
+  async function openPlanView() {
+    try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
+    showPlan("view");
+  }
+
+  // ---------- Чек-ин ----------
+
+  function renderCheckin() {
+    const ci = state.checkin;
+    const marks = state.marks;
+    const list = $("#checkin-list");
+    list.innerHTML = "";
+    let group = null;
+    ci.tactics.forEach((t) => {
+      if (t.priority_position !== group) {
+        group = t.priority_position;
+        const g = el2("div", "ci-group");
+        const dot = el2("span", "dot-p");
+        dot.style.cssText = "width:10px;height:10px;border-radius:50%;background:var(--p" + group + ")";
+        g.append(dot, document.createTextNode(t.priority_position + ". " + t.priority_title));
+        list.appendChild(g);
+      }
+      const row = el2("div", "ci-row");
+      const txt = el2("div", "ci-text");
+      txt.append(el2("b", null, t.text), el2("span", null, t.label));
+      const yn = el2("div", "yn");
+      [["yes", "✓", true, "Сделано"], ["no", "✕", false, "Не сделано"]].forEach(([cls, sym, val, aria]) => {
+        const b = el2("button", cls, sym);
+        b.type = "button";
+        b.setAttribute("aria-label", aria + ": " + t.text);
+        b.setAttribute("aria-pressed", String(marks[t.id] === val));
+        b.addEventListener("click", () => {
+          marks[t.id] = val;
+          haptic.tick();
+          renderCheckin();
+        });
+        yn.appendChild(b);
+      });
+      row.append(txt, yn);
+      list.appendChild(row);
+    });
+    const marked = ci.tactics.filter((t) => marks[t.id] != null).length;
+    $("#checkin-count").textContent = "Отмечено " + marked + " из " + ci.tactics.length;
+    const left = ci.tactics.length - marked;
+    mainButton(left ? "Отметь ещё " + left : "Сохранить неделю", saveCheckin, left === 0);
+  }
+
+  function showCheckin() {
+    const ci = state.checkin;
+    state.marks = {};
+    ci.tactics.forEach((t) => { if (t.done != null) state.marks[t.id] = t.done; });
+    show("screen-checkin");
+    $("#checkin-eyebrow").textContent = "Чек-ин · неделя " + ci.week_number + " · " + period(ci.week_start, ci.week_end);
+    backButton(showHome);
+    renderCheckin();
+  }
+
+  async function saveCheckin() {
+    const ci = state.checkin;
+    tg.MainButton.showProgress();
+    try {
+      const res = await api("PUT", "/api/checkin", { week_start: ci.week_start, marks: state.marks });
+      res.level === "critical" ? haptic.tick() : haptic.ok();
+      show("screen-result");
+      backButton(null);
+      $("#result-eyebrow").textContent = "Неделя " + ci.week_number;
+      const v = $("#result-value");
+      v.textContent = res.percent + "%";
+      v.style.color = "var(--" + (res.level === "critical" ? "bad" : res.level) + ")";
+      $("#result-rating").textContent = STATUS[res.level].icon + " " + res.rating;
+      $("#result-count").textContent = "Выполнено " + res.done + " из " + res.planned;
+      $("#result-advice").textContent = res.advice;
+      mainButton("На главную", showHome);
     } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
@@ -762,6 +943,8 @@
     haptic.err();
     const messages = {
       wrong_step: "Этот шаг уже пройден — открой приложение заново.",
+      mark_all: "Отметь все тактики этой недели.",
+      week_closed: "Эта неделя уже закрыта для отметок.",
       not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
       pick_exactly_3: "Нужно выбрать ровно 3.",
       intent_required: "Нужно «зачем» для каждого приоритета — хотя бы пару предложений.",
@@ -807,6 +990,7 @@
     }));
     $("#delete-tactic").addEventListener("click", deleteTactic);
     $("#edit-plan").addEventListener("click", showTactics);
+    $("#open-plan").addEventListener("click", openPlanView);
     try {
       state.me = await api("GET", "/api/me");
       document.querySelectorAll("[data-name]").forEach((n) => (n.textContent = state.me.first_name || ""));
@@ -825,8 +1009,7 @@
       } else if (step === "tactics") {
         showTactics();
       } else if (step === "done") {
-        state.plan = await api("GET", "/api/plan");
-        showPlan("view");
+        showHome();
       } else {
         $("#later-text").textContent = "12 недель позади — итоги и старт нового цикла пока в чате с ботом.";
         show("screen-later");

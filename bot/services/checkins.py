@@ -1,7 +1,7 @@
 """Еженедельный чек-ин: отметки по тактикам за неделю."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,20 @@ async def get_marks(session: AsyncSession, user: User, week: date) -> dict[int, 
 def checkin_week_number(user: User, week: date) -> int | None:
     """Номер недели цикла для недели, начинающейся с week (понедельник)."""
     return scorecard.week_number(user.cycle_start, week)
+
+
+def default_week(user: User, today: date) -> date:
+    """Текущая неделя. Прошлая — если за неё ещё нет отчёта и сегодня понедельник
+    или текущая неделя уже вне цикла (13-я неделя: 12-ю можно отметить в любой день)."""
+    this_week = scorecard.week_start(today)
+    prev_week = this_week - timedelta(days=7)
+    if (
+        (today.weekday() == 0 or checkin_week_number(user, this_week) is None)
+        and checkin_week_number(user, prev_week) is not None
+        and (user.last_reported_week is None or user.last_reported_week < prev_week)
+    ):
+        return prev_week
+    return this_week
 
 
 def can_check_in(user: User, week: date, today: date) -> bool:

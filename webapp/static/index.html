@@ -177,6 +177,48 @@
       </div>
     </section>
 
+    <!-- Главная в цикле -->
+    <section class="screen" id="screen-home" hidden>
+      <p class="eyebrow" id="home-eyebrow">12 недель</p>
+      <h1 id="home-title"></h1>
+      <p class="muted" id="home-sub"></p>
+      <div class="tiles">
+        <div class="tile"><span class="tile-label">Средний результат</span><span class="tile-value" id="home-avg">—</span><span class="tile-note" id="home-avg-note"></span></div>
+        <div class="tile"><span class="tile-label" id="home-week-label">Эта неделя</span><span class="tile-value" id="home-week">—</span><span class="tile-note" id="home-week-note"></span></div>
+      </div>
+      <h2>По неделям</h2>
+      <figure class="chart bars" aria-label="Процент выполнения по неделям">
+        <svg id="score-chart" viewBox="0 0 360 190" role="img"></svg>
+        <div class="tooltip" id="score-tip" hidden></div>
+        <figcaption class="legend status-legend">
+          <span><i class="sq good"></i>85%+ отлично</span>
+          <span><i class="sq warning"></i>70–84% хорошо</span>
+          <span><i class="sq critical"></i>&lt;70% сбой</span>
+        </figcaption>
+      </figure>
+      <button class="link" id="open-plan">Мой план →</button>
+    </section>
+
+    <!-- Чек-ин -->
+    <section class="screen" id="screen-checkin" hidden>
+      <p class="eyebrow" id="checkin-eyebrow"></p>
+      <h1>Как прошла неделя?</h1>
+      <p class="muted">Отметь по каждой тактике: получилось или нет. Честно — это только для тебя, команда увидит лишь процент.</p>
+      <p class="counter" id="checkin-count"></p>
+      <div id="checkin-list"></div>
+    </section>
+
+    <!-- Результат недели -->
+    <section class="screen" id="screen-result" hidden>
+      <div class="result">
+        <p class="eyebrow" id="result-eyebrow"></p>
+        <div class="result-value" id="result-value"></div>
+        <p class="result-rating" id="result-rating"></p>
+        <p class="muted" id="result-count"></p>
+        <div class="card" id="result-advice"></div>
+      </div>
+    </section>
+
     <!-- Шаги, которые пока в чате -->
     <section class="screen" id="screen-later" hidden>
       <h1>Привет, <span data-name></span>!</h1>

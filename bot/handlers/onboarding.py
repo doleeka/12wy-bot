@@ -212,7 +212,7 @@ async def _save_tactic(
 async def _advance(
     message: Message, session: AsyncSession, user: User, bot: Bot, settings: Settings | None
 ) -> None:
-    finished = svc.advance_tactics(user, local_today(settings))
+    finished = svc.advance_tactics(user, local_today(settings), settings.cycle_start if settings else None)
     if not finished:
         priority = await svc.current_tactic_priority(session, user)
         await message.answer(tactic_question(priority))

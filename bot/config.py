@@ -45,6 +45,9 @@ class Settings:
     planning_time: str = "09:00"
     # Ночной бэкап базы админам
     backup_time: str = "03:00"
+    # Общая дата старта цикла сообщества (понедельник). Кто готов раньше — стартует в этот день,
+    # кто позже — с ближайшего понедельника. None — каждая со своего ближайшего понедельника.
+    cycle_start: date | None = None
     # Mini App: публичный HTTPS-адрес приложения и порт веб-сервера внутри контейнера
     webapp_url: str = ""
     port: int = 8080
@@ -52,6 +55,16 @@ class Settings:
     @property
     def database_url(self) -> str:
         return f"sqlite+aiosqlite:///{self.database_path}"
+
+
+def _cycle_start() -> date | None:
+    raw = os.getenv("CYCLE_START", "").strip()
+    if not raw:
+        return None
+    value = date.fromisoformat(raw)
+    if value.weekday() != 0:
+        raise RuntimeError(f"CYCLE_START={raw} — не понедельник. Неделя цикла начинается с понедельника.")
+    return value
 
 
 def _webapp_url() -> str:
@@ -76,6 +89,7 @@ def load_settings() -> Settings:
         checkin_time=os.getenv("CHECKIN_TIME", "18:00"),
         planning_time=os.getenv("PLANNING_TIME", "09:00"),
         backup_time=os.getenv("BACKUP_TIME", "03:00"),
+        cycle_start=_cycle_start(),
         webapp_url=_webapp_url(),
         port=int(os.getenv("PORT", "8080")),
     )

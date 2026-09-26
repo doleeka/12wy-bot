@@ -14,6 +14,8 @@ kill_timeout = "10s"
 [env]
   DATABASE_PATH = "/data/bot.db"
   TIMEZONE = "Asia/Almaty"  # Астана, UTC+5
+  # Общий старт цикла сообщества — первый понедельник октября
+  CYCLE_START = "2026-10-05"
   CHECKIN_DAY = "sun"
   CHECKIN_TIME = "18:00"
   PLANNING_TIME = "09:00"

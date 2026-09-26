@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot import texts
 from bot.commands import set_bot_commands, set_webapp_menu_button
-from bot.config import load_settings
+from bot.config import load_settings, local_today
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
 from bot.handlers import admin, checkin, cycle, fallback, group, onboarding, start, teams, wheel
@@ -22,6 +22,7 @@ from bot.middlewares import DbSessionMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
+from bot.services.onboarding import align_to_cohort_start
 from webapp.app import create_app
 
 
@@ -63,6 +64,12 @@ async def main() -> None:
         logging.exception("restore.db не подошёл — работаю с текущей базой")
     await asyncio.to_thread(run_migrations, settings.database_path)
     engine = create_engine(settings.database_url)
+    if settings.cycle_start:
+        async with create_sessionmaker(engine)() as session:
+            moved = await align_to_cohort_start(session, settings.cycle_start, local_today(settings))
+            await session.commit()
+        if moved:
+            logging.info("Перенесено на общий старт %s: %d", settings.cycle_start, moved)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     sessionmaker = create_sessionmaker(engine)

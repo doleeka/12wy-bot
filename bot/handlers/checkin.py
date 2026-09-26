@@ -26,18 +26,7 @@ router.message.filter(F.chat.type == "private")
 _MARK = {True: "✅", False: "❌", None: "▫️"}
 
 
-def default_checkin_week(user: User, today: date) -> date:
-    """Текущая неделя. Прошлая — если за неё ещё нет отчёта и сегодня понедельник
-    или текущая неделя уже вне цикла (13-я неделя: 12-ю можно отметить в любой день)."""
-    this_week = scorecard.week_start(today)
-    prev_week = this_week - timedelta(days=7)
-    if (
-        (today.weekday() == 0 or checkins.checkin_week_number(user, this_week) is None)
-        and checkins.checkin_week_number(user, prev_week) is not None
-        and (user.last_reported_week is None or user.last_reported_week < prev_week)
-    ):
-        return prev_week
-    return this_week
+default_checkin_week = checkins.default_week  # общая логика с Mini App
 
 
 async def build_checkin(session: AsyncSession, user: User, week: date) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -56,14 +45,17 @@ async def build_checkin(session: AsyncSession, user: User, week: date) -> tuple[
     return "\n".join(lines) + texts.CHECKIN_FOOTER, keyboards.checkin(tactics, week.toordinal())
 
 
+def advice_for(value: int) -> str:
+    return {
+        "good": texts.SCORE_ADVICE_EXCELLENT,
+        "warning": texts.SCORE_ADVICE_GOOD,
+        "critical": texts.SCORE_ADVICE_LOW,
+    }[scorecard.level(value)]
+
+
 def result_text(n: int, done: int, planned: int) -> str:
     value = scorecard.percent(done, planned) or 0
-    if value >= scorecard.EXCELLENT:
-        advice = texts.SCORE_ADVICE_EXCELLENT
-    elif value >= scorecard.GOOD:
-        advice = texts.SCORE_ADVICE_GOOD
-    else:
-        advice = texts.SCORE_ADVICE_LOW
+    advice = advice_for(value)
     return texts.SCORE_RESULT.format(
         n=n,
         percent=value,

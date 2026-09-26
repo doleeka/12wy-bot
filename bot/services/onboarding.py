@@ -187,19 +187,20 @@ async def add_tactic(session: AsyncSession, user: User, priority: Priority, text
     return tactic
 
 
-def cycle_start_for(today: date) -> date:
-    """Неделя 1 стартует с ближайшего понедельника (сегодня, если сегодня понедельник)."""
-    return today + timedelta(days=(7 - today.weekday()) % 7)
+def cycle_start_for(today: date, cohort_start: date | None = None) -> date:
+    """Неделя 1 — с ближайшего понедельника (сегодня, если понедельник), но не раньше общей даты старта."""
+    nearest = today + timedelta(days=(7 - today.weekday()) % 7)
+    return max(nearest, cohort_start) if cohort_start else nearest
 
 
-def advance_tactics(user: User, today: date) -> bool:
+def advance_tactics(user: User, today: date, cohort_start: date | None = None) -> bool:
     """Переходит к следующему приоритету. True — онбординг завершён."""
     position = (user.onboarding_position or 0) + 1
     if position > PRIORITIES_COUNT:
         user.onboarding_position = None
         user.onboarding_step = OnboardingStep.DONE
         user.is_ready = True
-        user.cycle_start = cycle_start_for(today)
+        user.cycle_start = cycle_start_for(today, cohort_start)
         return True
     user.onboarding_position = position
     return False
@@ -221,3 +222,20 @@ async def reset_onboarding(session: AsyncSession, user: User) -> None:
     user.cycle_start = None
     user.last_reported_week = None
     await session.flush()
+
+
+async def align_to_cohort_start(session: AsyncSession, cohort_start: date, today: date) -> int:
+    """Переносит на общую дату старта тех, чей цикл назначен раньше и ещё не начался.
+
+    Например, участница прошла онбординг в сентябре и получила старт 28.09, а сообщество
+    стартует 5.10. Уже идущие циклы не трогаем. Возвращает, сколько участниц перенесено.
+    """
+    users = await session.scalars(
+        select(User).where(User.cycle_start.is_not(None), User.cycle_start < cohort_start, User.cycle_start > today)
+    )
+    moved = 0
+    for user in users:
+        user.cycle_start = cohort_start
+        moved += 1
+    await session.flush()
+    return moved

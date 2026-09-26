@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from datetime import date, timedelta
 from pathlib import Path
 
 from aiogram import Bot
@@ -17,9 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
 from bot.models import OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
-from bot.services import cycle, tactics, teams, wheel
+from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
+from bot.handlers.checkin import advice_for, send_report
 from webapp.auth import telegram_user
 
 log = logging.getLogger(__name__)
@@ -46,6 +48,11 @@ class EliminateIn(BaseModel):
 
 class IntentIn(BaseModel):
     intents: dict[int, str]
+
+
+class CheckinIn(BaseModel):
+    week_start: str
+    marks: dict[int, bool]
 
 
 class TacticIn(BaseModel):
@@ -262,7 +269,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                 }
             )
         team = await teams.get_team_of(session, user)
-        start = user.cycle_start or svc.cycle_start_for(local_today(settings))
+        start = user.cycle_start or svc.cycle_start_for(local_today(settings), settings.cycle_start)
         return {
             "step": user.onboarding_step.value,
             "priorities": out,
@@ -336,6 +343,115 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         await session.flush()
         return await plan_payload(session, user)
 
+    # ---------- Чек-ин и scorecard ----------
+
+    CHECKIN_STEPS = (OnboardingStep.DONE, OnboardingStep.FINISHED)
+
+    @app.get("/api/checkin")
+    async def get_checkin(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        today = local_today(settings)
+        week = checkins.default_week(user, today)
+        n = checkins.checkin_week_number(user, week)
+        if n is None:
+            not_started = user.cycle_start is not None and today < user.cycle_start
+            return {
+                "status": "not_started" if not_started else "over",
+                "cycle_start": user.cycle_start.isoformat() if user.cycle_start else None,
+            }
+        week_tactics = await checkins.tactics_for_week(session, user, week)
+        marks = await checkins.get_marks(session, user, week)
+        done, planned, unmarked = checkins.summarize(week_tactics, marks)
+        return {
+            "status": "active",
+            "week_number": n,
+            "week_start": week.isoformat(),
+            "week_end": (week + timedelta(days=6)).isoformat(),
+            "tactics": [
+                {
+                    "id": t.id,
+                    "text": t.text,
+                    "label": tactics.weeks_label(t.weeks),
+                    "priority_position": t.priority.position,
+                    "priority_title": t.priority.title,
+                    "done": marks.get(t.id),
+                }
+                for t in week_tactics
+            ],
+            "result": result_payload(done, planned) if planned and not unmarked else None,
+        }
+
+    def result_payload(done: int, planned: int) -> dict:
+        value = scorecard.percent(done, planned) or 0
+        return {
+            "percent": value,
+            "level": scorecard.level(value),
+            "rating": scorecard.rating(value),
+            "done": done,
+            "planned": planned,
+            "advice": advice_for(value),
+        }
+
+    @app.put("/api/checkin")
+    async def save_checkin(
+        body: CheckinIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        try:
+            week = date.fromisoformat(body.week_start)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="bad_week") from None
+        if not checkins.can_check_in(user, week, local_today(settings)):
+            raise HTTPException(status_code=409, detail="week_closed")
+        week_tactics = await checkins.tactics_for_week(session, user, week)
+        if not week_tactics:
+            raise HTTPException(status_code=422, detail="no_tactics")
+        if set(body.marks) != {t.id for t in week_tactics}:
+            raise HTTPException(status_code=422, detail="mark_all")
+        for tactic_id, done in body.marks.items():
+            await checkins.set_mark(session, user, tactic_id, week, done)
+        done = sum(1 for v in body.marks.values() if v)
+        result = result_payload(done, len(week_tactics))
+        if app.state.bot is not None:
+            try:  # отчёт по флагу send_report — один раз за неделю
+                await send_report(app.state.bot, session, user, week, result["percent"], settings)
+            except TelegramAPIError as e:
+                log.warning("Не удалось отправить отчёт %s: %s", user.telegram_id, e)
+        else:
+            user.last_reported_week = max(user.last_reported_week or week, week)
+        return result
+
+    @app.get("/api/scorecard")
+    async def get_scorecard(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        today = local_today(settings)
+        all_tactics = await checkins.active_tactics(session, user)
+        weeks = []
+        if user.cycle_start:
+            for n in tactics.ALL_WEEKS:
+                week = user.cycle_start + timedelta(days=7 * (n - 1))
+                value = await scorecard.week_percent(session, user, week)
+                weeks.append(
+                    {
+                        "n": n,
+                        "week_start": week.isoformat(),
+                        "planned": len(tactics.for_week(all_tactics, n)),
+                        "percent": value,
+                        "level": scorecard.level(value) if value is not None else None,
+                        "future": week > scorecard.week_start(today),
+                    }
+                )
+        marked = [w["percent"] for w in weeks if w["percent"] is not None]
+        avg = round(sum(marked) / len(marked)) if marked else None
+        return {
+            "cycle_start": user.cycle_start.isoformat() if user.cycle_start else None,
+            "current_week": scorecard.week_number(user.cycle_start, today),
+            "weeks": weeks,
+            "average": avg,
+            "average_level": scorecard.level(avg) if avg is not None else None,
+            "thresholds": {"good": scorecard.EXCELLENT, "warning": scorecard.GOOD},
+        }
+
     @app.post("/api/plan/confirm")
     async def confirm_plan(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         """Итоговый экран → «готова»: старт цикла с ближайшего понедельника и распределение в команду."""
@@ -346,7 +462,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         user.onboarding_step = OnboardingStep.DONE
         user.onboarding_position = None
         user.is_ready = True
-        user.cycle_start = svc.cycle_start_for(local_today(settings))
+        user.cycle_start = svc.cycle_start_for(local_today(settings), settings.cycle_start)
         await session.flush()
         if app.state.bot is not None:
             from bot.handlers.teams import join_team
