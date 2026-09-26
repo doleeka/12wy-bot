@@ -6,7 +6,7 @@
   const $ = (sel) => document.querySelector(sel);
   const state = {
     me: null, wheel: null, scores: {}, touched: new Set(), extras: [],
-    explore: null, picked: new Set(), intent: null, drafts: {},
+    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null,
   };
   let mainHandler = null;
   let backHandler = null;
@@ -493,7 +493,7 @@
     }
     show("screen-intent");
     // пока «зачем» не сохранены, выбор трёх можно пересмотреть
-    backButton(state.me.step === "intent" ? showEliminate : showIntentDone);
+    backButton(state.me.step === "intent" ? showEliminate : showTactics);
     renderIntent();
   }
 
@@ -506,24 +506,256 @@
       state.intent = await api("PUT", "/api/intent", { intents });
       state.me.step = "tactics";
       haptic.ok();
-      showIntentDone();
+      showTactics();
     } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
-  function showIntentDone() {
-    show("screen-intent-done");
-    backButton(null);
-    const box = $("#priorities-summary");
+  // ---------- Тактики ----------
+
+  const MEASURABLE = /\d|раз|кажд|ежедн|минут|час|страниц|шаг|км|километр|тренировк|сесси|урок/i;
+  const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+  function formatDate(iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return d + " " + MONTHS[m - 1];
+  }
+
+  function el2(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  // Таблица «тактики × 12 недель»: строка — тактика (цвет приоритета), колонка — неделя, внизу — нагрузка
+  function renderGrid(box, plan) {
+    const weeks = Array.from({ length: plan.weeks_total }, (_, i) => i + 1);
+    const table = el2("table");
+    table.setAttribute("aria-label", "План по неделям");
+    const head = table.createTHead().insertRow();
+    head.appendChild(el2("th", "name", ""));
+    weeks.forEach((w) => head.appendChild(el2("th", null, String(w))));
+    const body = table.createTBody();
+    plan.priorities.forEach((p) => {
+      if (!p.tactics.length) return;
+      const g = body.insertRow();
+      g.className = "group-row";
+      const gh = el2("th", null, p.position + ". " + p.title);
+      gh.colSpan = weeks.length + 1;
+      g.appendChild(gh);
+      p.tactics.forEach((t) => {
+        const row = body.insertRow();
+        row.className = "p" + p.position;
+        const name = el2("th", "name", t.text);
+        name.title = t.text + " — " + t.label;
+        row.appendChild(name);
+        weeks.forEach((w) => {
+          const on = t.weeks == null || t.weeks.includes(w);
+          const td = el2("td", "cell" + (on ? " on" : ""));
+          td.title = "Неделя " + w + ": " + (on ? t.text : "—");
+          row.appendChild(td);
+        });
+      });
+    });
+    const foot = table.createTFoot().insertRow();
+    foot.appendChild(el2("th", "name", "в неделю"));
+    const peak = Math.max(...plan.load);
+    plan.load.forEach((n) => foot.appendChild(el2("td", n === peak && n > 0 ? "peak" : null, String(n))));
     box.innerHTML = "";
-    state.intent.priorities.forEach((p) => {
-      const card = document.createElement("div");
-      card.className = "card priority";
-      card.innerHTML = "<b></b><p></p>";
-      card.querySelector("b").textContent = p.position + ". " + p.title;
-      card.querySelector("p").textContent = "Зачем: " + p.intent;
+    box.appendChild(table);
+  }
+
+  function bufferText(plan) {
+    const peak = Math.max(...plan.load);
+    if (!peak) return "";
+    const week = plan.load.indexOf(peak) + 1;
+    return "Больше всего тактик — " + peak + " — на неделе " + week + ". Оставь буфер на непредвиденное: неделя, забитая на 100%, ломается от первого форс-мажора.";
+  }
+
+  function renderTactics() {
+    const plan = state.plan;
+    const box = $("#tactic-groups");
+    box.innerHTML = "";
+    plan.priorities.forEach((p) => {
+      const group = el2("div", "group");
+      const head = el2("div", "group-head");
+      const dot = el2("span", "dot-p");
+      dot.style.background = "var(--p" + p.position + ")";
+      head.append(dot, el2("b", null, p.position + ". " + p.title));
+      group.append(head, el2("p", "why", "Зачем: " + p.intent));
+      p.tactics.forEach((t) => {
+        const btn = el2("button", "tactic");
+        const main = el2("span", "t-main");
+        main.append(el2("span", "t-text", t.text), el2("span", "t-when", t.label));
+        if (!t.measurable) main.appendChild(el2("span", "t-warn", "💡 добавь число — сколько раз, минут, страниц?"));
+        btn.append(main, el2("span", "chev", "›"));
+        btn.addEventListener("click", () => openEditor(p, t));
+        group.appendChild(btn);
+      });
+      const add = el2("button", "add-tactic", "+ Тактика");
+      add.disabled = p.tactics.length >= plan.max_per_priority;
+      add.addEventListener("click", () => openEditor(p, null));
+      group.appendChild(add);
+      const n = p.tactics.length;
+      const [lo, hi] = plan.recommended;
+      if (n && n < lo) group.appendChild(el2("p", "count-note", "Обычно " + lo + "–" + hi + " тактик: регулярные и контрольные точки."));
+      if (n >= plan.max_per_priority) group.appendChild(el2("p", "count-note", "Максимум " + plan.max_per_priority + " — меньше, но лучше."));
+      box.appendChild(group);
+    });
+    renderGrid($("#tactics-grid"), plan);
+    $("#buffer-hint").textContent = bufferText(plan);
+    const missing = plan.priorities.find((p) => !p.tactics.length);
+    mainButton(missing ? "Добавь тактику в «" + missing.title.slice(0, 24) + "»" : "Проверить план", () => showPlan("review"), !missing);
+  }
+
+  async function showTactics() {
+    try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
+    show("screen-tactics");
+    backButton(showIntent); // «зачем» можно поправить, пока план не подтверждён
+    renderTactics();
+  }
+
+  // ---------- редактор тактики ----------
+
+  function openEditor(priority, tactic) {
+    const weeks = tactic && tactic.weeks ? tactic.weeks : null;
+    state.edit = {
+      priorityId: priority.id,
+      tacticId: tactic ? tactic.id : null,
+      mode: weeks == null ? "every" : weeks.length === 1 ? "one" : "some",
+      weeks: new Set(weeks || []),
+    };
+    show("screen-tactic-edit");
+    $("#edit-priority").textContent = priority.position + ". " + priority.title;
+    $("#edit-title").textContent = tactic ? "Тактика" : "Новая тактика";
+    const ta = $("#tactic-text");
+    ta.value = tactic ? tactic.text : "";
+    $("#delete-tactic").hidden = !tactic;
+    backButton(showTactics);
+    renderEditor();
+    if (!tactic) ta.focus();
+  }
+
+  function editorValid() {
+    const e = state.edit;
+    const text = $("#tactic-text").value.trim();
+    if (!text) return false;
+    if (e.mode === "some") return e.weeks.size >= 1;
+    if (e.mode === "one") return e.weeks.size === 1;
+    return true;
+  }
+
+  function renderEditor() {
+    const e = state.edit;
+    document.querySelectorAll("#schedule-mode button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === e.mode)));
+    const grid = $("#week-grid");
+    grid.hidden = e.mode === "every";
+    grid.innerHTML = "";
+    if (e.mode !== "every") {
+      for (let w = 1; w <= 12; w++) {
+        const b = el2("button", null, String(w));
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(e.weeks.has(w)));
+        b.setAttribute("aria-label", "Неделя " + w);
+        b.addEventListener("click", () => {
+          if (e.mode === "one") e.weeks = new Set([w]);
+          else e.weeks.has(w) ? e.weeks.delete(w) : e.weeks.add(w);
+          haptic.tick();
+          renderEditor();
+        });
+        grid.appendChild(b);
+      }
+    }
+    const sorted = Array.from(e.weeks).sort((a, b) => a - b);
+    $("#weeks-summary").textContent =
+      e.mode === "every" ? "Все 12 недель — регулярная тактика." :
+      !sorted.length ? (e.mode === "one" ? "Выбери неделю." : "Отметь недели — например, 4, 8 и 12 как контрольные точки.") :
+      (sorted.length === 1 ? "Неделя " : "Недели ") + sorted.join(", ");
+    const text = $("#tactic-text").value.trim();
+    // для регулярных тактик: «каждую неделю» без числа обычно размыто; контрольная точка и так «да / нет»
+    $("#measurable-hint").textContent = text && e.mode === "every" && !MEASURABLE.test(text) ? "💡 Похоже на цель. Сделай измеримой: сколько раз, минут, страниц?" : "";
+    mainButton("Сохранить тактику", saveTactic, editorValid());
+  }
+
+  async function saveTactic() {
+    if (!editorValid()) return;
+    const e = state.edit;
+    const body = { text: $("#tactic-text").value.trim(), weeks: e.mode === "every" ? null : Array.from(e.weeks) };
+    tg.MainButton.showProgress();
+    try {
+      state.plan = e.tacticId
+        ? await api("PUT", "/api/tactics/" + e.tacticId, body)
+        : await api("POST", "/api/tactics", Object.assign({ priority_id: e.priorityId }, body));
+      haptic.ok();
+      show("screen-tactics");
+      backButton(showIntent);
+      renderTactics();
+    } catch (err) { failed(err); } finally { tg.MainButton.hideProgress(); }
+  }
+
+  function deleteTactic() {
+    tg.showConfirm("Удалить эту тактику?", async (ok) => {
+      if (!ok) return;
+      try {
+        state.plan = await api("DELETE", "/api/tactics/" + state.edit.tacticId);
+        show("screen-tactics");
+        backButton(showIntent);
+        renderTactics();
+      } catch (err) { failed(err); }
+    });
+  }
+
+  // ---------- итог плана ----------
+
+  function showPlan(mode) {
+    const plan = state.plan;
+    const review = mode === "review";
+    show("screen-plan");
+    $("#plan-eyebrow").textContent = review ? "Шаг 6 · Итог" : "12 недель";
+    $("#plan-title").textContent = review ? "Твой план на 12 недель" : "Мой план";
+    const [y, m, d] = plan.cycle_start.split("-").map(Number);
+    const started = new Date(y, m - 1, d) <= new Date();
+    $("#plan-start").textContent =
+      (started ? "Цикл идёт с " : "Старт — в понедельник, ") + formatDate(plan.cycle_start) +
+      (plan.team ? " · " + plan.team : "");
+    const box = $("#plan-priorities");
+    box.innerHTML = "";
+    plan.priorities.forEach((p) => {
+      const card = el2("div", "card plan-prio");
+      card.append(el2("b", null, p.position + ". " + p.title), el2("p", "why", "Зачем: " + p.intent));
+      const ul = el2("ul");
+      p.tactics.forEach((t) => {
+        const li = el2("li", null, t.text + " ");
+        li.appendChild(el2("span", null, "· " + t.label));
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
       box.appendChild(card);
     });
-    mainButton("Перейти в чат к тактикам", () => tg.close());
+    renderGrid($("#plan-grid"), plan);
+    $("#plan-buffer").textContent = bufferText(plan);
+    $("#edit-plan").hidden = !review;
+    if (review) {
+      backButton(showTactics);
+      mainButton("Подтвердить план", confirmPlan);
+    } else {
+      backButton(null);
+      mainButton("Вернуться в чат", () => tg.close());
+    }
+  }
+
+  async function confirmPlan() {
+    tg.MainButton.showProgress();
+    try {
+      state.plan = await api("POST", "/api/plan/confirm");
+      state.me.step = "done";
+      haptic.ok();
+      show("screen-ready");
+      backButton(null);
+      $("#ready-start").textContent = "Неделя 1 из 12 начинается в понедельник, " + formatDate(state.plan.cycle_start) + ".";
+      $("#ready-team").textContent = state.plan.team ? "Твоя команда — " + state.plan.team + " 🤝 Подробности я написала в чат." : "";
+      mainButton("Посмотреть план", () => showPlan("view"));
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
   function failed(e) {
@@ -533,6 +765,9 @@
       not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
       pick_exactly_3: "Нужно выбрать ровно 3.",
       intent_required: "Нужно «зачем» для каждого приоритета — хотя бы пару предложений.",
+      empty_priority: "В каждом приоритете нужна хотя бы одна тактика.",
+      limit: "Это максимум — меньше, но лучше.",
+      bad_weeks: "Выбери хотя бы одну неделю.",
     };
     tg.showAlert(messages[e.detail] || "Не получилось. Проверь интернет и попробуй ещё раз.");
   }
@@ -561,7 +796,17 @@
       if (ev.key === "Enter" && !ev.shiftKey) addExplore(ev);
     });
     $("#back-to-explore").addEventListener("click", showExplore);
-    $("#edit-intent").addEventListener("click", showIntent);
+    $("#tactic-text").addEventListener("input", () => { autosize($("#tactic-text")); renderEditor(); });
+    document.querySelectorAll("#schedule-mode button").forEach((b) => b.addEventListener("click", () => {
+      const e = state.edit;
+      e.mode = b.dataset.mode;
+      if (e.mode === "one" && e.weeks.size > 1) e.weeks = new Set([Math.min(...e.weeks)]);
+      if (e.mode === "every") e.weeks = new Set();
+      haptic.tick();
+      renderEditor();
+    }));
+    $("#delete-tactic").addEventListener("click", deleteTactic);
+    $("#edit-plan").addEventListener("click", showTactics);
     try {
       state.me = await api("GET", "/api/me");
       document.querySelectorAll("[data-name]").forEach((n) => (n.textContent = state.me.first_name || ""));
@@ -577,8 +822,13 @@
         showEliminate();
       } else if (step === "intent") {
         showIntent();
+      } else if (step === "tactics") {
+        showTactics();
+      } else if (step === "done") {
+        state.plan = await api("GET", "/api/plan");
+        showPlan("view");
       } else {
-        if (step === "tactics") $("#later-text").textContent = "Сейчас — тактики: этот шаг пока проходит в чате с ботом.";
+        $("#later-text").textContent = "12 недель позади — итоги и старт нового цикла пока в чате с ботом.";
         show("screen-later");
         backButton(null);
         mainButton("Вернуться в чат", () => tg.close());

@@ -13,11 +13,18 @@
   --series-now: #2a78d6;
   --series-before: #eb6834;
   --critical: #d03b3b;
+  /* приоритеты 1–3 в плане: категориальные цвета, проверены валидатором */
+  --p1: #2a78d6;
+  --p2: #eb6834;
+  --p3: #1baf7a;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
   --series-now: #3987e5;
   --series-before: #d95926;
+  --p1: #3987e5;
+  --p2: #d95926;
+  --p3: #199e70;
   color-scheme: dark;
 }
 
@@ -138,3 +145,69 @@ details.card ul { margin: 8px 0 4px; padding-left: 18px; color: var(--hint); }
 .priority { margin: 0 0 10px; }
 .priority b { display: block; }
 .priority p { color: var(--hint); margin: 2px 0 0; overflow-wrap: anywhere; }
+
+/* ---------- тактики ---------- */
+.group { margin: 20px 0 8px; }
+.group-head { display: flex; gap: 10px; align-items: baseline; }
+.group-head .dot-p { width: 10px; height: 10px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+.group-head b { font-size: 17px; overflow-wrap: anywhere; }
+.group .why { color: var(--hint); font-size: 14px; margin: 2px 0 8px 20px; overflow-wrap: anywhere; }
+.tactic {
+  display: flex; align-items: center; gap: 10px; background: var(--bg-2); border-radius: 12px; padding: 10px 12px;
+  margin-bottom: 6px; width: 100%; border: 0; font: inherit; color: var(--text); text-align: left; cursor: pointer;
+}
+.tactic .t-main { flex: 1; min-width: 0; }
+.tactic .t-text { display: block; overflow-wrap: anywhere; }
+.tactic .t-when { display: block; font-size: 13px; color: var(--hint); }
+.tactic .t-warn { font-size: 13px; color: var(--hint); }
+.tactic .chev { color: var(--hint); }
+.add-tactic {
+  width: 100%; border: 1px dashed var(--line); background: none; color: var(--link); font: inherit;
+  border-radius: 12px; padding: 10px; cursor: pointer;
+}
+.add-tactic:disabled { color: var(--hint); cursor: default; }
+.count-note { font-size: 13px; color: var(--hint); margin: 4px 0 0; }
+
+.field-label { font-weight: 600; margin: 16px 0 6px; display: block; }
+.field {
+  width: 100%; font: inherit; color: var(--text); background: var(--bg-2); border: 1px solid transparent;
+  border-radius: 12px; padding: 10px 12px; resize: none; outline: none;
+}
+.field:focus { border-color: var(--accent); }
+.hint-line { font-size: 13px; color: var(--hint); min-height: 18px; margin: 4px 0 0; }
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--bg-2); border-radius: 12px; padding: 4px; }
+.segmented button {
+  border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; padding: 8px 4px; border-radius: 9px; cursor: pointer;
+}
+.segmented button[aria-checked="true"] { background: var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.12); font-weight: 600; }
+.week-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 12px; }
+.week-grid[hidden] { display: none; }
+.week-grid button {
+  height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font: inherit; font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.week-grid button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.link.danger { color: var(--critical); margin-top: 16px; }
+
+/* ---------- план по неделям: строки — тактики, колонки — недели ---------- */
+.plan-grid { overflow-x: auto; margin: 4px -4px 4px; padding: 0 4px; }
+.plan-grid table { border-collapse: separate; border-spacing: 2px; width: 100%; table-layout: fixed; font-size: 12px; }
+.plan-grid th, .plan-grid td { padding: 0; text-align: center; }
+.plan-grid thead th { color: var(--hint); font-weight: 500; height: 20px; font-variant-numeric: tabular-nums; }
+.plan-grid .name { width: 38%; text-align: left; padding-right: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 400; }
+.plan-grid .group-row th { text-align: left; font-weight: 600; color: var(--text); padding-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-grid td.cell { height: 20px; border-radius: 4px; background: color-mix(in srgb, var(--hint) 10%, transparent); }
+.plan-grid td.cell.on { background: var(--pc); }
+.plan-grid tr.p1 { --pc: var(--p1); } .plan-grid tr.p2 { --pc: var(--p2); } .plan-grid tr.p3 { --pc: var(--p3); }
+.plan-grid tfoot th, .plan-grid tfoot td { color: var(--hint); padding-top: 6px; font-variant-numeric: tabular-nums; }
+.plan-grid tfoot td.peak { color: var(--text); font-weight: 700; }
+
+/* ---------- итог и «готова» ---------- */
+.plan-prio { margin: 0 0 12px; }
+.plan-prio b { display: block; overflow-wrap: anywhere; }
+.plan-prio .why { color: var(--hint); margin: 2px 0 6px; overflow-wrap: anywhere; }
+.plan-prio ul { margin: 0; padding-left: 18px; }
+.plan-prio li { overflow-wrap: anywhere; }
+.plan-prio li span { color: var(--hint); font-size: 13px; }
+.ready { text-align: center; padding-top: 12vh; }
+.ready-emoji { font-size: 56px; }

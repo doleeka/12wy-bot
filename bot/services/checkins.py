@@ -23,6 +23,13 @@ async def active_tactics(session: AsyncSession, user: User) -> list[WeeklyTactic
     return list(rows)
 
 
+async def tactics_for_week(session: AsyncSession, user: User, week: date) -> list[WeeklyTactic]:
+    """Тактики, которые по плану выпадают на неделю week (понедельник)."""
+    tactics = await active_tactics(session, user)
+    n = checkin_week_number(user, week)
+    return [t for t in tactics if n is not None and t.in_week(n)]
+
+
 async def get_marks(session: AsyncSession, user: User, week: date) -> dict[int, bool]:
     rows = await session.scalars(select(Checkin).where(Checkin.user_id == user.id, Checkin.week_start == week))
     return {row.tactic_id: row.done for row in rows}

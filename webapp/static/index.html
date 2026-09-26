@@ -121,16 +121,60 @@
       <div id="intent-list"></div>
     </section>
 
-    <!-- Итог Explore → intent, дальше тактики в чате -->
-    <section class="screen" id="screen-intent-done" hidden>
-      <p class="eyebrow">Твои приоритеты</p>
-      <h1>Три главных на 12 недель</h1>
-      <div id="priorities-summary"></div>
-      <div class="card accent">
-        <b>Дальше — тактики ⚙️</b>
-        <p class="muted">Этот шаг пока проходит в чате с ботом — я уже написала тебе первый вопрос. Скоро здесь появится полный 12-недельный план.</p>
+    <!-- Тактики -->
+    <section class="screen" id="screen-tactics" hidden>
+      <p class="eyebrow">Шаг 5 · Тактики</p>
+      <h1>Что ты будешь делать?</h1>
+      <p class="muted">Цель — это куда. Тактика — это действие, по которому в конце недели можно честно ответить «да» или «нет».</p>
+      <div class="card">
+        <p>❌ «Больше заботиться о здоровье»<br>✅ «3 тренировки по 30 минут»</p>
+        <p class="muted small">Обычно 3–8 тактик на приоритет: регулярные (каждую неделю) и контрольные точки — например, недели 4, 8 и 12.</p>
       </div>
-      <button class="link" id="edit-intent">Изменить «зачем»</button>
+      <div id="tactic-groups"></div>
+      <h2>План на 12 недель</h2>
+      <div class="plan-grid" id="tactics-grid"></div>
+      <p class="muted small" id="buffer-hint"></p>
+    </section>
+
+    <!-- Редактор тактики -->
+    <section class="screen" id="screen-tactic-edit" hidden>
+      <p class="eyebrow" id="edit-priority"></p>
+      <h1 id="edit-title">Новая тактика</h1>
+      <label class="field-label" for="tactic-text">Действие</label>
+      <textarea id="tactic-text" class="field" rows="2" maxlength="200" placeholder="Например: 3 тренировки по 30 минут"></textarea>
+      <p class="hint-line" id="measurable-hint"></p>
+      <p class="field-label">Когда</p>
+      <div class="segmented" id="schedule-mode" role="radiogroup">
+        <button type="button" data-mode="every" role="radio">Каждую неделю</button>
+        <button type="button" data-mode="some" role="radio">Выбрать недели</button>
+        <button type="button" data-mode="one" role="radio">Одна неделя</button>
+      </div>
+      <div class="week-grid" id="week-grid" hidden></div>
+      <p class="muted small" id="weeks-summary"></p>
+      <button class="link danger" id="delete-tactic" hidden>Удалить тактику</button>
+    </section>
+
+    <!-- Итог плана -->
+    <section class="screen" id="screen-plan" hidden>
+      <p class="eyebrow" id="plan-eyebrow">Итог</p>
+      <h1 id="plan-title">Твой план на 12 недель</h1>
+      <p class="muted" id="plan-start"></p>
+      <div id="plan-priorities"></div>
+      <h2>По неделям</h2>
+      <div class="plan-grid" id="plan-grid"></div>
+      <p class="muted small" id="plan-buffer"></p>
+      <button class="link" id="edit-plan" hidden>← Изменить тактики</button>
+    </section>
+
+    <!-- Готова -->
+    <section class="screen" id="screen-ready" hidden>
+      <div class="ready">
+        <div class="ready-emoji">🎉</div>
+        <h1>Ты готова!</h1>
+        <p id="ready-start"></p>
+        <p id="ready-team"></p>
+        <p class="muted">Каждую неделю я буду присылать тактики этой недели для чек-ина. 85%+ — отлично, 70–84% — хорошо, ниже 70% — повод разобраться, что помешало. Не 100% — и это нормально.</p>
+      </div>
     </section>
 
     <!-- Шаги, которые пока в чате -->

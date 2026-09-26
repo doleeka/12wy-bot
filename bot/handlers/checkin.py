@@ -41,7 +41,7 @@ def default_checkin_week(user: User, today: date) -> date:
 
 
 async def build_checkin(session: AsyncSession, user: User, week: date) -> tuple[str, InlineKeyboardMarkup | None]:
-    tactics = await checkins.active_tactics(session, user)
+    tactics = await checkins.tactics_for_week(session, user, week)
     if not tactics:
         return texts.CHECKIN_NO_TACTICS, None
     marks = await checkins.get_marks(session, user, week)
@@ -142,7 +142,7 @@ async def on_checkin_callback(
         text, markup = await build_checkin(session, user, week)
         await safe_edit(callback.message, text, markup)
     elif action == "done":
-        tactics = await checkins.active_tactics(session, user)
+        tactics = await checkins.tactics_for_week(session, user, week)
         marks = await checkins.get_marks(session, user, week)
         done, planned, unmarked = checkins.summarize(tactics, marks)
         if not planned:

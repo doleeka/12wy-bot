@@ -56,9 +56,12 @@ async def week_percent(session: AsyncSession, user: User, week: date) -> int | N
             )
         )
     ).one()
-    planned = await session.scalar(
-        select(func.count(WeeklyTactic.id)).where(WeeklyTactic.user_id == user.id, WeeklyTactic.is_active)
+    tactics = await session.scalars(
+        select(WeeklyTactic).where(WeeklyTactic.user_id == user.id, WeeklyTactic.is_active)
     )
+    n = week_number(user.cycle_start, week)
+    # запланировано — только тактики, которые по плану выпадают на эту неделю
+    planned = sum(1 for t in tactics if n is None or t.in_week(n))
     if not marked or marked < planned:
         return None
     return percent(done, marked)

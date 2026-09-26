@@ -12,12 +12,12 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.config import Settings
-from bot.models import OnboardingStep, User, WheelOfBalance
-from bot.services import cycle, wheel
+from bot.config import Settings, local_today
+from bot.models import OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
+from bot.services import cycle, tactics, teams, wheel
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
 from webapp.auth import telegram_user
@@ -46,6 +46,12 @@ class EliminateIn(BaseModel):
 
 class IntentIn(BaseModel):
     intents: dict[int, str]
+
+
+class TacticIn(BaseModel):
+    text: str
+    weeks: list[int] | None = None  # None — каждую неделю
+    priority_id: int | None = None  # нужен при добавлении
 
 
 class ChatTarget:
@@ -221,20 +227,138 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         body: IntentIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         require_step(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
-        first_time = user.onboarding_step == OnboardingStep.INTENT
         try:
             await svc.set_intents(session, user, body.intents)
         except ValueError:
             raise HTTPException(status_code=422, detail="intent_required") from None
-        if first_time and app.state.bot is not None:
-            # Тактики пока проходят в чате — передаём эстафету: бот пишет первый вопрос
-            from bot.handlers.onboarding import send_step_prompt
-
-            try:
-                await send_step_prompt(ChatTarget(app.state.bot, user.telegram_id), session, user)
-            except TelegramAPIError as e:  # заблокировала бота и т.п. — «зачем» всё равно сохранены
-                log.warning("Не удалось отправить подсказку тактик %s: %s", user.telegram_id, e)
         return await intent_payload(session, user)
+
+    # ---------- Тактики и 12-недельный план ----------
+
+    async def plan_payload(session: AsyncSession, user: User) -> dict:
+        priorities = await svc.get_priorities(session, user)
+        all_tactics = []
+        out = []
+        for p in priorities:
+            active = [t for t in sorted(p.tactics, key=lambda t: t.id) if t.is_active]
+            all_tactics += active
+            out.append(
+                {
+                    "id": p.id,
+                    "position": p.position,
+                    "title": p.title,
+                    "intent": p.intent.text if p.intent else "",
+                    "tactics": [
+                        {
+                            "id": t.id,
+                            "text": t.text,
+                            "weeks": t.weeks,
+                            "label": tactics.weeks_label(t.weeks),
+                            # контрольная точка / разовая тактика и так «да или нет» в свою неделю
+                            "measurable": t.weeks is not None or svc.is_measurable(t.text),
+                        }
+                        for t in active
+                    ],
+                }
+            )
+        team = await teams.get_team_of(session, user)
+        start = user.cycle_start or svc.cycle_start_for(local_today(settings))
+        return {
+            "step": user.onboarding_step.value,
+            "priorities": out,
+            "load": tactics.load_per_week(all_tactics),
+            "max_per_priority": tactics.MAX_TACTICS_PER_PRIORITY,
+            "recommended": [tactics.RECOMMENDED_MIN, tactics.RECOMMENDED_MAX],
+            "weeks_total": len(tactics.ALL_WEEKS),
+            "cycle_start": start.isoformat(),
+            "team": teams.team_name(team) if team else None,
+        }
+
+    async def own_priority(session: AsyncSession, user: User, priority_id: int) -> Priority:
+        priority = await session.get(Priority, priority_id)
+        if priority is None or priority.user_id != user.id or priority.cycle != user.cycle:
+            raise HTTPException(status_code=404, detail="no_priority")
+        return priority
+
+    async def own_tactic(session: AsyncSession, user: User, tactic_id: int) -> WeeklyTactic:
+        tactic = await session.get(WeeklyTactic, tactic_id)
+        if tactic is None or tactic.user_id != user.id or not tactic.is_active:
+            raise HTTPException(status_code=404, detail="no_tactic")
+        return tactic
+
+    def clean_tactic(body: TacticIn) -> tuple[str, list[int] | None]:
+        text = body.text.strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="empty")
+        if len(text) > tactics.MAX_TACTIC_LEN:
+            raise HTTPException(status_code=422, detail="too_long")
+        try:
+            return text, tactics.normalize_weeks(body.weeks)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="bad_weeks") from None
+
+    @app.get("/api/plan")
+    async def get_plan(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        return await plan_payload(session, user)
+
+    @app.post("/api/tactics")
+    async def add_tactic(
+        body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, OnboardingStep.TACTICS)
+        priority = await own_priority(session, user, body.priority_id or 0)
+        text, weeks = clean_tactic(body)
+        count = await session.scalar(
+            select(func.count(WeeklyTactic.id)).where(WeeklyTactic.priority_id == priority.id, WeeklyTactic.is_active)
+        )
+        if count >= tactics.MAX_TACTICS_PER_PRIORITY:
+            raise HTTPException(status_code=422, detail="limit")
+        session.add(WeeklyTactic(priority_id=priority.id, user_id=user.id, text=text, weeks=weeks))
+        await session.flush()
+        return await plan_payload(session, user)
+
+    @app.put("/api/tactics/{tactic_id}")
+    async def edit_tactic(
+        tactic_id: int, body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, OnboardingStep.TACTICS)
+        tactic = await own_tactic(session, user, tactic_id)
+        tactic.text, tactic.weeks = clean_tactic(body)
+        await session.flush()
+        return await plan_payload(session, user)
+
+    @app.delete("/api/tactics/{tactic_id}")
+    async def delete_tactic(
+        tactic_id: int, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        require_step(user, OnboardingStep.TACTICS)
+        await session.delete(await own_tactic(session, user, tactic_id))
+        await session.flush()
+        return await plan_payload(session, user)
+
+    @app.post("/api/plan/confirm")
+    async def confirm_plan(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        """Итоговый экран → «готова»: старт цикла с ближайшего понедельника и распределение в команду."""
+        require_step(user, OnboardingStep.TACTICS)
+        priorities = await svc.get_priorities(session, user)
+        if any(not any(t.is_active for t in p.tactics) for p in priorities):
+            raise HTTPException(status_code=422, detail="empty_priority")
+        user.onboarding_step = OnboardingStep.DONE
+        user.onboarding_position = None
+        user.is_ready = True
+        user.cycle_start = svc.cycle_start_for(local_today(settings))
+        await session.flush()
+        if app.state.bot is not None:
+            from bot.handlers.teams import join_team
+
+            try:  # в чат — сообщение о команде; сокомандницам и админам — уведомления
+                await join_team(ChatTarget(app.state.bot, user.telegram_id), app.state.bot, session, user, settings)
+            except TelegramAPIError as e:
+                log.warning("Не удалось отправить сообщение о команде %s: %s", user.telegram_id, e)
+                await teams.assign_to_team(session, user)
+        else:
+            await teams.assign_to_team(session, user)
+        return await plan_payload(session, user)
 
     # ---------- фронтенд ----------
 

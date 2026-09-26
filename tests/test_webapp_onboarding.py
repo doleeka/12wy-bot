@@ -18,7 +18,7 @@ async def step(sessionmaker, tg_id=42):
         return (await teams.get_user_by_telegram_id(session, tg_id)).onboarding_step
 
 
-async def test_full_path_to_tactics(api, sessionmaker):  # noqa: F811
+async def test_path_explore_to_intent(api, sessionmaker):  # noqa: F811
     await to_explore(api)
     data = (await api.get("/api/explore", headers=auth())).json()
     assert data["items"] == [] and data["min"] == 3 and data["pick"] == 3
@@ -68,13 +68,11 @@ async def test_full_path_to_tactics(api, sessionmaker):  # noqa: F811
     r = await api.put("/api/intent", headers=auth(), json={"intents": {str(p): WHY for p in pids}})
     assert r.status_code == 200 and all(p["intent"] == WHY for p in r.json()["priorities"])
     assert await step(sessionmaker) == OnboardingStep.TACTICS
-    # эстафета в чат: бот сразу спрашивает первую тактику
-    chat = "\n".join(api.tg.sent(42))
-    assert "Тактики" in chat and "Приоритет 1 из 3" in chat and "Спорт" in chat and WHY in chat
+    assert api.tg.sent(42) == []  # тактики теперь в приложении — в чат не пишем
 
-    # поправить «зачем» можно, повторного сообщения в чат нет; Explore и выбор уже закрыты
+    # поправить «зачем» можно; Explore и выбор уже закрыты
     r = await api.put("/api/intent", headers=auth(), json={"intents": {str(p): WHY + "!" for p in pids}})
-    assert r.status_code == 200 and len(api.tg.sent(42)) == 2
+    assert r.status_code == 200
     assert (await api.post("/api/explore", headers=auth(), json={"text": "Ещё"})).status_code == 409
     assert (await api.put("/api/eliminate", headers=auth(), json={"selected": pids})).status_code == 409
 

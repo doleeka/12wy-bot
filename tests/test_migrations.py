@@ -79,7 +79,8 @@ def test_0002_team_chat_keeps_members(tmp_path):
     backup = migrate.run_migrations(db)
     assert rows(db, "SELECT team_id, user_id FROM team_members ORDER BY user_id") == [(1, 1), (2, 2)]
     assert rows(db, "SELECT id, chat_id, invite_link FROM teams ORDER BY id") == [(1, -100500, None), (2, None, None)]
-    assert backup and "pre-migration_0001-to-0002" in backup
+    head = migrate.head_revision(migrate.alembic_config(db))
+    assert backup and f"pre-migration_0001-to-{head}" in backup
     with pytest.raises(sqlite3.IntegrityError):  # один чат — одна команда
         conn = sqlite3.connect(db)
         conn.execute("UPDATE teams SET chat_id = -100500 WHERE id = 2")
@@ -155,3 +156,21 @@ def test_old_pre_migration_backups_are_pruned(tmp_path):
     fresh = migrate._pre_migration_backup(db, "a", "b")
     left = list(backups.glob("pre-migration_*.db"))
     assert len(left) == migrate.KEEP_PRE_MIGRATION_BACKUPS and fresh in left
+
+
+def test_0003_existing_tactics_become_every_week(tmp_path):
+    """Тактики, созданные до расписания по неделям, остаются «каждую неделю» (weeks = NULL)."""
+    db = tmp_path / "bot.db"
+    _database_at(db, "0002")
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        INSERT INTO users (id, telegram_id, onboarding_step, is_ready, send_report, cycle) VALUES (1, 1, 'DONE', 1, 'TEAM', 1);
+        INSERT INTO priorities (id, user_id, cycle, position, title) VALUES (1, 1, 1, 1, 'Спорт');
+        INSERT INTO weekly_tactics (id, priority_id, user_id, text, is_active) VALUES (1, 1, 1, '3 тренировки', 1);
+        """
+    )
+    conn.commit()
+    conn.close()
+    migrate.run_migrations(db)
+    assert rows(db, "SELECT text, weeks FROM weekly_tactics") == [("3 тренировки", None)]

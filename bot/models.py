@@ -16,6 +16,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     MetaData,
+    JSON,
     Integer,
     String,
     Text,
@@ -151,7 +152,11 @@ class EssentialIntent(Base):
 
 
 class WeeklyTactic(Base):
-    """Измеримое еженедельное действие по приоритету (1–2 на приоритет)."""
+    """Тактика — измеримое действие по приоритету с расписанием на недели цикла.
+
+    weeks: None — каждую неделю (1–12); иначе список номеров недель, например [2, 6, 12]
+    (контрольные точки) или [5] (разовая).
+    """
 
     __tablename__ = "weekly_tactics"
 
@@ -159,10 +164,14 @@ class WeeklyTactic(Base):
     priority_id: Mapped[int] = mapped_column(ForeignKey("priorities.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     text: Mapped[str] = mapped_column(Text)
+    weeks: Mapped[list[int] | None] = mapped_column(JSON)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     priority: Mapped[Priority] = relationship(back_populates="tactics")
+
+    def in_week(self, week_number: int) -> bool:
+        return self.weeks is None or week_number in self.weeks
     checkins: Mapped[list[Checkin]] = relationship(back_populates="tactic", cascade="all, delete-orphan")
 
 

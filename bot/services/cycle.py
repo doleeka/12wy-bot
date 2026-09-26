@@ -60,10 +60,9 @@ class CycleStats:
 async def cycle_stats(session: AsyncSession, user: User) -> CycleStats:
     """% по неделям цикла. Запланировано = тактики текущего цикла (они активны, пока не начат новый)."""
     tactics = await checkins.active_tactics(session, user)
-    planned = len(tactics)
     tactic_ids = {t.id for t in tactics}
     weeks: list[int | None] = [None] * scorecard.CYCLE_WEEKS
-    if user.cycle_start is None or not planned:
+    if user.cycle_start is None or not tactics:
         return CycleStats(weeks)
     rows = await session.scalars(
         select(Checkin).where(
@@ -81,6 +80,7 @@ async def cycle_stats(session: AsyncSession, user: User) -> CycleStats:
         marked_weeks.add(n)
         done_by_week[n] = done_by_week.get(n, 0) + int(row.done)
     for n in marked_weeks:
+        planned = sum(1 for t in tactics if t.in_week(n + 1))
         weeks[n] = scorecard.percent(done_by_week.get(n, 0), planned)
     return CycleStats(weeks)
 

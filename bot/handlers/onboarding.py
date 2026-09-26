@@ -21,6 +21,7 @@ from bot.models import OnboardingStep, Priority, User
 from bot.services import cycle
 from bot.services import onboarding as svc
 from bot.handlers.teams import join_team
+from bot.services.tactics import weeks_label
 from bot.services.users import get_or_create_user
 
 router = Router(name="onboarding")
@@ -62,7 +63,11 @@ def tactic_question(priority: Priority) -> str:
 def plan_text(priorities: list[Priority]) -> str:
     blocks = []
     for p in priorities:
-        tactics = "\n".join(texts.PLAN_TACTIC.format(text=escape(t.text)) for t in p.tactics if t.is_active)
+        tactics = "\n".join(
+            texts.PLAN_TACTIC.format(text=escape(t.text)) + ("" if t.weeks is None else f" <i>({weeks_label(t.weeks)})</i>")
+            for t in p.tactics
+            if t.is_active
+        )
         blocks.append(
             texts.PLAN_PRIORITY.format(
                 n=p.position,

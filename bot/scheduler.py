@@ -54,7 +54,7 @@ async def send_week_planning(bot: Bot, sessionmaker: async_sessionmaker, setting
                 await asyncio.sleep(SEND_DELAY)
                 continue
             n = scorecard.week_number(user.cycle_start, today)
-            tactics = await checkins.active_tactics(session, user)
+            tactics = await checkins.tactics_for_week(session, user, scorecard.week_start(today))
             if n is None or not tactics:
                 continue
             lines = "\n".join(f"• {escape(t.text)}" for t in tactics)
