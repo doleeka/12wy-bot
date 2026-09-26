@@ -25,5 +25,6 @@ def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
 
 
 async def init_db(engine: AsyncEngine) -> None:
+    """Создаёт таблицы напрямую из моделей — только для тестов. Бот использует миграции (bot.migrate)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

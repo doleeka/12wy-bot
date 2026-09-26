@@ -11,6 +11,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+COPY alembic.ini .
 COPY bot ./bot
 
 # /data — точка монтирования persistent volume на Fly.io (см. fly.toml).

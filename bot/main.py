@@ -10,7 +10,8 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import load_settings
-from bot.db import create_engine, create_sessionmaker, init_db
+from bot.db import create_engine, create_sessionmaker
+from bot.migrate import run_migrations
 from bot.handlers import admin, checkin, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.scheduler import setup_scheduler
@@ -33,8 +34,8 @@ async def main() -> None:
         apply_pending_restore(settings.database_path)
     except Exception:  # noqa: BLE001 — битый restore.db не должен ронять бота в цикл перезапусков
         logging.exception("restore.db не подошёл — работаю с текущей базой")
+    await asyncio.to_thread(run_migrations, settings.database_path)
     engine = create_engine(settings.database_url)
-    await init_db(engine)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     sessionmaker = create_sessionmaker(engine)
