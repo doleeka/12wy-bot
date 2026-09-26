@@ -87,3 +87,23 @@ def tactic_keep() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Оставить как есть", callback_data="tac:keep")]]
     )
+
+
+# ---------- Чек-ин ----------
+#   ci:m:<tactic_id>:<week ordinal>:<1|0> | ci:done:<week ordinal> | ci:edit:<week ordinal>
+
+
+def checkin(tactics, week_ordinal: int) -> InlineKeyboardMarkup:  # noqa: ANN001
+    builder = InlineKeyboardBuilder()
+    for n, tactic in enumerate(tactics, 1):
+        builder.button(text=f"{n} ✅", callback_data=f"ci:m:{tactic.id}:{week_ordinal}:1")
+        builder.button(text=f"{n} ❌", callback_data=f"ci:m:{tactic.id}:{week_ordinal}:0")
+    builder.adjust(4)
+    builder.row(InlineKeyboardButton(text="Посчитать →", callback_data=f"ci:done:{week_ordinal}"))
+    return builder.as_markup()
+
+
+def checkin_edit(week_ordinal: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="✏️ Изменить отметки", callback_data=f"ci:edit:{week_ordinal}")]]
+    )

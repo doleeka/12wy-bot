@@ -62,6 +62,8 @@ class User(Base):
     cycle_start: Mapped[date | None] = mapped_column(Date)
     # На шаге тактик — позиция приоритета (1..3), к которому сейчас добавляются тактики
     onboarding_position: Mapped[int | None] = mapped_column(Integer)
+    # Понедельник последней недели, за которую уже отправлен отчёт (чтобы не слать повторно)
+    last_reported_week: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")

@@ -48,7 +48,7 @@ def rating_emoji(value: int | None) -> str:
 
 
 async def week_percent(session: AsyncSession, user: User, week: date) -> int | None:
-    """% за неделю или None, если за эту неделю ещё нет ни одной отметки."""
+    """% за неделю или None, если чек-ин за эту неделю ещё не заполнен целиком."""
     done, marked = (
         await session.execute(
             select(func.coalesce(func.sum(cast(Checkin.done, Integer)), 0), func.count(Checkin.id)).where(
@@ -56,9 +56,9 @@ async def week_percent(session: AsyncSession, user: User, week: date) -> int | N
             )
         )
     ).one()
-    if not marked:
-        return None
     planned = await session.scalar(
         select(func.count(WeeklyTactic.id)).where(WeeklyTactic.user_id == user.id, WeeklyTactic.is_active)
     )
-    return percent(done, max(planned, marked))
+    if not marked or marked < planned:
+        return None
+    return percent(done, marked)

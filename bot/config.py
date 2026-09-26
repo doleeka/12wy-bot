@@ -22,6 +22,10 @@ class Settings:
     database_path: Path
     admin_ids: list[int] = field(default_factory=list)
     timezone: str = "Europe/Moscow"
+    # Когда присылать чек-ин (день недели в формате cron: mon..sun) и напоминание о новой неделе (понедельник)
+    checkin_day: str = "sun"
+    checkin_time: str = "18:00"
+    planning_time: str = "09:00"
 
     @property
     def database_url(self) -> str:
@@ -37,6 +41,9 @@ def load_settings() -> Settings:
         database_path=Path(os.getenv("DATABASE_PATH", "./data/bot.db")).expanduser(),
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
+        checkin_day=os.getenv("CHECKIN_DAY", "sun"),
+        checkin_time=os.getenv("CHECKIN_TIME", "18:00"),
+        planning_time=os.getenv("PLANNING_TIME", "09:00"),
     )
 
 

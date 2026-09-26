@@ -19,12 +19,17 @@ python -m bot.main
 | Команда | Кто | Что делает |
 |---|---|---|
 | `/start` | все | онбординг / продолжить с текущего шага |
+| `/checkin` | участница | чек-ин недели: ✅/❌ по тактикам → % и оценка |
 | `/plan` | участница | мои приоритеты, «зачем» и тактики |
 | `/team` | участница | моя команда и % выполнения за неделю (только проценты) |
 | `/teams` | админ | все команды с telegram_id участниц |
 | `/moveteam <telegram_id> <team_id\|new>` | админ | перевести участницу в другую / новую команду |
+| `/report <telegram_id> [team\|admin\|none]` | админ | куда отправлять отчёт участницы (без аргумента — показать) |
 
 Админы задаются в `ADMIN_IDS`.
+
+Расписание (часовой пояс `TIMEZONE`): чек-ин — `CHECKIN_DAY` в `CHECKIN_TIME` (по умолчанию воскресенье 18:00),
+напоминание о старте недели с подсказкой про буфер — понедельник в `PLANNING_TIME` (09:00).
 
 ## Структура
 
@@ -39,7 +44,8 @@ bot/
   keyboards.py     inline-клавиатуры
   handlers/        start.py (/start), wheel.py (колесо баланса),
                    onboarding.py (Explore, Eliminate, Intent, тактики, /plan),
-                   teams.py (/team, /teams, /moveteam)
+                   teams.py (/team, /teams, /moveteam), checkin.py (/checkin, /report)
+  scheduler.py     APScheduler: воскресный чек-ин, понедельничное напоминание
   services/        бизнес-логика без привязки к Telegram
 tests/
 ```
@@ -54,6 +60,6 @@ tests/
 - [x] `/start` + колесо баланса (6 основных сфер + до 2 дополнительных, визуализация и просадки)
 - [x] Explore → Eliminate (ровно 3) → Essential intent → Тактики, `/plan`
 - [x] Автораспределение в команды (до 3 человек), `/team`, админские `/teams` и `/moveteam`
-- [ ] Еженедельный чек-ин и scorecard, `send_report`
+- [x] Еженедельный чек-ин и scorecard, `send_report` (`/report`), расписание (APScheduler)
 - [ ] Автобэкап базы админу (APScheduler)
 - [ ] Dockerfile + fly.toml с volume

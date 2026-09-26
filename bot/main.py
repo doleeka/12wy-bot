@@ -11,14 +11,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker, init_db
-from bot.handlers import onboarding, start, teams, wheel
+from bot.handlers import checkin, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
+from bot.scheduler import setup_scheduler
 
 
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
-    dp.include_routers(start.router, teams.router, wheel.router, onboarding.router)
+    dp.include_routers(start.router, teams.router, checkin.router, wheel.router, onboarding.router)
     return dp
 
 
@@ -31,13 +32,18 @@ async def main() -> None:
     await init_db(engine)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = build_dispatcher(create_sessionmaker(engine))
+    sessionmaker = create_sessionmaker(engine)
+    dp = build_dispatcher(sessionmaker)
     dp["settings"] = settings
+
+    scheduler = setup_scheduler(bot, sessionmaker, settings)
+    scheduler.start()
 
     logging.info("DB: %s", settings.database_path.resolve())
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown(wait=False)
         await bot.session.close()
         await engine.dispose()
 
