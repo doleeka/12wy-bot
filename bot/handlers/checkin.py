@@ -15,10 +15,13 @@ from bot.filters import IsAdmin
 from bot.handlers.cycle import send_summary
 from bot.models import OnboardingStep, ReportTarget, User
 from bot.notify import display_name, safe_edit, safe_send
+from bot.team_notify import notify_team
 from bot.services import checkins, cycle, scorecard, teams
 from bot.services.users import get_or_create_user
 
 router = Router(name="checkin")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 _MARK = {True: "✅", False: "❌", None: "▫️"}
 
@@ -87,14 +90,8 @@ async def send_report(
     )
     if user.send_report == ReportTarget.TEAM:
         team = await teams.get_team_of(session, user)
-        if team is None:
-            return
-        if team.chat_id:
-            await safe_send(bot, team.chat_id, text)
-        else:
-            for mate in await teams.team_members(session, team.id):
-                if mate.id != user.id:
-                    await safe_send(bot, mate.telegram_id, text)
+        if team is not None:
+            await notify_team(bot, session, team, text, settings, exclude=user)
     elif user.send_report == ReportTarget.ADMIN:
         for admin_id in settings.admin_ids if settings else []:
             await safe_send(bot, admin_id, text)

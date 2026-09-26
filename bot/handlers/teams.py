@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from html import escape
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,10 +14,13 @@ from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.models import OnboardingStep, Team, User
 from bot.notify import display_name, safe_send
+from bot.team_notify import chat_line, notify_team, remove_from_chat
 from bot.services import scorecard, teams
 from bot.services.users import get_or_create_user
 
 router = Router(name="teams")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 
 def _mates_text(user: User, members: list[User]) -> str:
@@ -36,15 +39,15 @@ async def join_team(
     """
     existing = await teams.get_team_of(session, user)
     if existing is not None:
-        await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))))
+        await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))) + chat_line(existing))
         return existing
     team, created = await teams.assign_to_team(session, user)
     members = await teams.team_members(session, team.id)
     name = escape(teams.team_name(team))
-    await message.answer(texts.TEAM_JOINED.format(team=name, mates=_mates_text(user, members)))
-    for mate in members:
-        if mate.id != user.id:
-            await safe_send(bot, mate.telegram_id, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)))
+    await message.answer(texts.TEAM_JOINED.format(team=name, mates=_mates_text(user, members)) + chat_line(team))
+    await notify_team(
+        bot, session, team, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)), settings, exclude=user
+    )
     for admin_id in settings.admin_ids if settings else []:
         await safe_send(
             bot,
@@ -73,9 +76,6 @@ async def cmd_team(message: Message, session: AsyncSession, bot: Bot, settings: 
         team = await join_team(message, bot, session, user, settings)
 
     today = local_today(settings)
-    this_week = scorecard.week_start(today)
-    prev_week = this_week - timedelta(days=7)
-
     n = scorecard.week_number(user.cycle_start, today)
     if n is not None:
         week = texts.TEAM_WEEK.format(n=n)
@@ -86,6 +86,16 @@ async def cmd_team(message: Message, session: AsyncSession, bot: Bot, settings: 
     else:
         week = texts.TEAM_WEEK_OVER
 
+    rows = await team_rows(session, team, today, viewer=user)
+    await message.answer(
+        texts.TEAM_VIEW.format(team=escape(teams.team_name(team)), week=week, rows=rows) + chat_line(team)
+    )
+
+
+async def team_rows(session: AsyncSession, team: Team, today, viewer: User | None = None) -> str:  # noqa: ANN001
+    """Строки «имя — % за эту неделю (прошлая)». Только проценты — без целей и тактик."""
+    this_week = scorecard.week_start(today)
+    prev_week = this_week - timedelta(days=7)
     rows = []
     for member in await teams.team_members(session, team.id):
         current = await scorecard.week_percent(session, member, this_week)
@@ -94,12 +104,12 @@ async def cmd_team(message: Message, session: AsyncSession, bot: Bot, settings: 
             texts.TEAM_ROW.format(
                 emoji=scorecard.rating_emoji(current),
                 name=escape(member.first_name or "") or "Участница",
-                you=" (ты)" if member.id == user.id else "",
+                you=" (ты)" if viewer is not None and member.id == viewer.id else "",
                 current=_fmt_percent(current),
                 prev=texts.TEAM_PREV.format(value=f"{prev}%") if prev is not None else "",
             )
         )
-    await message.answer(texts.TEAM_VIEW.format(team=escape(teams.team_name(team)), week=week, rows="\n".join(rows)))
+    return "\n".join(rows)
 
 
 # ---------- админ ----------
@@ -113,7 +123,10 @@ async def cmd_teams(message: Message, session: AsyncSession) -> None:
         ) or "   —"
         blocks.append(
             texts.ADMIN_TEAMS_ROW.format(
-                team=escape(teams.team_name(team)), id=team.id, count=len(members), members=member_lines
+                team=escape(teams.team_name(team)) + (texts.ADMIN_TEAMS_CHAT if team.chat_id else ""),
+                id=team.id,
+                count=len(members),
+                members=member_lines,
             )
         )
     unassigned = await teams.ready_without_team(session)
@@ -129,7 +142,9 @@ async def cmd_teams(message: Message, session: AsyncSession) -> None:
 
 
 @router.message(Command("moveteam"), IsAdmin())
-async def cmd_moveteam(message: Message, command: CommandObject, session: AsyncSession, bot: Bot) -> None:
+async def cmd_moveteam(
+    message: Message, command: CommandObject, session: AsyncSession, bot: Bot, settings: Settings | None = None
+) -> None:
     args = (command.args or "").split()
     if len(args) != 2 or not args[0].lstrip("-").isdigit() or not (args[1].isdigit() or args[1].lower() == "new"):
         await message.answer(texts.ADMIN_MOVE_USAGE)
@@ -160,15 +175,40 @@ async def cmd_moveteam(message: Message, command: CommandObject, session: AsyncS
         return
 
     members = await teams.team_members(session, new_team.id)
-    await safe_send(bot, user.telegram_id, texts.TEAM_MOVED.format(team=escape(new_name), mates=_mates_text(user, members)))
-    for mate in members:
-        if mate.id != user.id:
-            await safe_send(bot, mate.telegram_id, texts.TEAM_NEW_MEMBER.format(team=escape(new_name), name=display_name(user)))
+    await safe_send(
+        bot,
+        user.telegram_id,
+        texts.TEAM_MOVED.format(team=escape(new_name), mates=_mates_text(user, members)) + chat_line(new_team),
+    )
+    await notify_team(
+        bot,
+        session,
+        new_team,
+        texts.TEAM_NEW_MEMBER.format(team=escape(new_name), name=display_name(user)),
+        settings,
+        exclude=user,
+    )
     if old_team is not None:
-        for mate in await teams.team_members(session, old_team.id):
-            await safe_send(bot, mate.telegram_id, texts.TEAM_MEMBER_LEFT.format(name=display_name(user)))
+        await notify_team(bot, session, old_team, texts.TEAM_MEMBER_LEFT.format(name=display_name(user)), settings)
+        # чтобы бывшая участница не видела отчёты прежней команды
+        if old_team.chat_id and not await remove_from_chat(bot, old_team.chat_id, user.telegram_id):
+            await message.answer(texts.ADMIN_KICK_FAILED.format(name=display_name(user)))
 
 
-@router.message(Command("teams", "moveteam"))
+@router.message(Command("unlinkteam"), IsAdmin())
+async def cmd_unlinkteam(message: Message, command: CommandObject, session: AsyncSession) -> None:
+    arg = (command.args or "").strip()
+    if not arg.isdigit():
+        await message.answer(texts.ADMIN_UNLINK_USAGE)
+        return
+    team = await session.get(Team, int(arg))
+    if team is None:
+        await message.answer(texts.ADMIN_TEAM_NOT_FOUND.format(team_id=arg))
+        return
+    teams.unlink_chat(team)
+    await message.answer(texts.ADMIN_UNLINKED.format(team=escape(teams.team_name(team))))
+
+
+@router.message(Command("teams", "moveteam", "unlinkteam"))
 async def admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)

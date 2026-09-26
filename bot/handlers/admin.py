@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -10,6 +10,8 @@ from bot.config import Settings
 from bot.filters import IsAdmin
 
 router = Router(name="admin")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 
 @router.message(Command("backup"), IsAdmin())

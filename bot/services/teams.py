@@ -117,3 +117,43 @@ async def ready_without_team(session: AsyncSession) -> list[User]:
         .order_by(User.id)
     )
     return list(rows)
+
+
+# ---------- групповой чат команды ----------
+
+async def get_team_by_chat(session: AsyncSession, chat_id: int) -> Team | None:
+    return await session.scalar(select(Team).where(Team.chat_id == chat_id))
+
+
+async def link_chat(session: AsyncSession, team_id: int, chat_id: int) -> tuple[Team, Team | None]:
+    """Привязывает чат к команде. Один чат — одна команда: у прежней команды чат отвязывается.
+
+    Возвращает (команда, команда_у_которой_чат_был_раньше).
+    """
+    team = await session.get(Team, team_id)
+    if team is None:
+        raise TeamNotFound
+    previous = await get_team_by_chat(session, chat_id)
+    if previous is not None and previous.id != team.id:
+        previous.chat_id = None
+        previous.invite_link = None
+        await session.flush()  # иначе уникальность chat_id сработает раньше, чем освободится значение
+    if team.chat_id != chat_id:
+        team.invite_link = None
+    team.chat_id = chat_id
+    await session.flush()
+    return team, previous if previous is not None and previous.id != team.id else None
+
+
+def unlink_chat(team: Team) -> None:
+    team.chat_id = None
+    team.invite_link = None
+
+
+async def migrate_chat(session: AsyncSession, old_chat_id: int, new_chat_id: int) -> Team | None:
+    """Группа стала супергруппой — у неё новый id."""
+    team = await get_team_by_chat(session, old_chat_id)
+    if team is not None:
+        team.chat_id = new_chat_id
+        await session.flush()
+    return team

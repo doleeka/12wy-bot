@@ -8,8 +8,6 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine
 
 from bot import migrate
-from bot.db import create_engine as create_async_engine_
-from bot.db import init_db
 from bot.models import Base
 
 
@@ -42,12 +40,18 @@ def test_second_run_is_noop(tmp_path):
     assert not (tmp_path / migrate.BACKUPS_DIR_NAME).exists()
 
 
-async def test_legacy_create_all_database_is_stamped(tmp_path):
+def _database_at(db, revision):
+    from alembic import command
+
+    command.upgrade(migrate.alembic_config(db), revision)
+
+
+def test_legacy_database_without_alembic_is_stamped(tmp_path):
+    """База, созданная через create_all до появления миграций, — это схема ревизии 0001 без alembic_version."""
     db = tmp_path / "bot.db"
-    engine = create_async_engine_(f"sqlite+aiosqlite:///{db}")
-    await init_db(engine)
-    await engine.dispose()
+    _database_at(db, migrate.BASELINE_REVISION)
     conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE alembic_version")
     conn.execute("INSERT INTO users (telegram_id, onboarding_step, is_ready, send_report, cycle) VALUES (1,'DONE',1,'TEAM',1)")
     conn.commit()
     conn.close()
@@ -55,6 +59,30 @@ async def test_legacy_create_all_database_is_stamped(tmp_path):
     migrate.run_migrations(db)
     assert rows(db, "SELECT version_num FROM alembic_version") == [(migrate.head_revision(migrate.alembic_config(db)),)]
     assert rows(db, "SELECT telegram_id FROM users") == [(1,)]
+
+
+def test_0002_team_chat_keeps_members(tmp_path):
+    """0002 пересоздаёт teams (уникальный chat_id), а team_members ссылается на неё с ON DELETE CASCADE."""
+    db = tmp_path / "bot.db"
+    _database_at(db, "0001")
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        INSERT INTO users (id, telegram_id, onboarding_step, is_ready, send_report, cycle) VALUES (1, 1, 'DONE', 1, 'TEAM', 1), (2, 2, 'DONE', 1, 'TEAM', 1);
+        INSERT INTO teams (id, chat_id) VALUES (1, -100500), (2, NULL);
+        INSERT INTO team_members (team_id, user_id) VALUES (1, 1), (2, 2);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    backup = migrate.run_migrations(db)
+    assert rows(db, "SELECT team_id, user_id FROM team_members ORDER BY user_id") == [(1, 1), (2, 2)]
+    assert rows(db, "SELECT id, chat_id, invite_link FROM teams ORDER BY id") == [(1, -100500, None), (2, None, None)]
+    assert backup and "pre-migration_0001-to-0002" in backup
+    with pytest.raises(sqlite3.IntegrityError):  # один чат — одна команда
+        conn = sqlite3.connect(db)
+        conn.execute("UPDATE teams SET chat_id = -100500 WHERE id = 2")
 
 
 NEW_REVISION = '''

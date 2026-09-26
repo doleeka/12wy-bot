@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,8 @@ from bot.services import cycle, wheel
 from bot.services.users import get_or_create_user
 
 router = Router(name="start")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 
 @router.message(CommandStart())

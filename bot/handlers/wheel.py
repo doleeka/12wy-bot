@@ -16,6 +16,8 @@ from bot.services import cycle, wheel
 from bot.services.users import get_or_create_user
 
 router = Router(name="wheel")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 
 def _question(sphere: wheel.Sphere) -> tuple[str, InlineKeyboardMarkup]:

@@ -193,7 +193,9 @@ class Team(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(String(64))
-    chat_id: Mapped[int | None] = mapped_column(BigInteger)  # групповой чат команды, если есть
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)  # групповой чат команды, если есть
+    # Ссылка-приглашение в чат (если бот — админ группы и смог её создать)
+    invite_link: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     members: Mapped[list[TeamMember]] = relationship(back_populates="team", cascade="all, delete-orphan")

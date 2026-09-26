@@ -12,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, checkin, cycle, onboarding, start, teams, wheel
+from bot.handlers import admin, checkin, cycle, group, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
@@ -21,7 +21,10 @@ from bot.services.backup import apply_pending_restore
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
-    dp.include_routers(start.router, admin.router, teams.router, checkin.router, cycle.router, wheel.router, onboarding.router)
+    # group — только групповые чаты; остальные роутеры — только личка (фильтр задан в каждом модуле)
+    dp.include_routers(
+        group.router, start.router, admin.router, teams.router, checkin.router, cycle.router, wheel.router, onboarding.router
+    )
     return dp
 
 
@@ -47,7 +50,7 @@ async def main() -> None:
 
     logging.info("DB: %s", settings.database_path.resolve())
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         scheduler.shutdown(wait=False)
         await bot.session.close()

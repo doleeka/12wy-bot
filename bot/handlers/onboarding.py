@@ -24,6 +24,8 @@ from bot.handlers.teams import join_team
 from bot.services.users import get_or_create_user
 
 router = Router(name="onboarding")
+# Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
+router.message.filter(F.chat.type == "private")
 
 EXPLORE_DISPLAY_LEN = 100
 
