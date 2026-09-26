@@ -58,6 +58,7 @@ class CheckinIn(BaseModel):
 class TacticIn(BaseModel):
     text: str
     weeks: list[int] | None = None  # None — каждую неделю
+    days: list[int] | None = None  # для еженедельных: 0 = пн … 6 = вс
     priority_id: int | None = None  # нужен при добавлении
 
 
@@ -260,7 +261,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                             "id": t.id,
                             "text": t.text,
                             "weeks": t.weeks,
-                            "label": tactics.weeks_label(t.weeks),
+                            "days": t.days,
+                            "label": tactics.weeks_label(t.weeks, t.days),
                             # контрольная точка / разовая тактика и так «да или нет» в свою неделю
                             "measurable": t.weeks is not None or svc.is_measurable(t.text),
                         }
@@ -293,16 +295,25 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             raise HTTPException(status_code=404, detail="no_tactic")
         return tactic
 
-    def clean_tactic(body: TacticIn) -> tuple[str, list[int] | None]:
+    def clean_tactic(body: TacticIn) -> tuple[str, list[int] | None, list[int] | None]:
         text = body.text.strip()
         if not text:
             raise HTTPException(status_code=422, detail="empty")
         if len(text) > tactics.MAX_TACTIC_LEN:
             raise HTTPException(status_code=422, detail="too_long")
         try:
-            return text, tactics.normalize_weeks(body.weeks)
+            weeks = tactics.normalize_weeks(body.weeks)
         except ValueError:
             raise HTTPException(status_code=422, detail="bad_weeks") from None
+        if weeks is not None:
+            return text, weeks, None  # дни недели — только у еженедельных тактик
+        try:
+            days = tactics.normalize_days(body.days)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="bad_days") from None
+        if days is None:
+            raise HTTPException(status_code=422, detail="pick_days")
+        return text, None, days
 
     @app.get("/api/plan")
     async def get_plan(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
@@ -314,13 +325,13 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     ) -> dict:
         require_step(user, OnboardingStep.TACTICS)
         priority = await own_priority(session, user, body.priority_id or 0)
-        text, weeks = clean_tactic(body)
+        text, weeks, days = clean_tactic(body)
         count = await session.scalar(
             select(func.count(WeeklyTactic.id)).where(WeeklyTactic.priority_id == priority.id, WeeklyTactic.is_active)
         )
         if count >= tactics.MAX_TACTICS_PER_PRIORITY:
             raise HTTPException(status_code=422, detail="limit")
-        session.add(WeeklyTactic(priority_id=priority.id, user_id=user.id, text=text, weeks=weeks))
+        session.add(WeeklyTactic(priority_id=priority.id, user_id=user.id, text=text, weeks=weeks, days=days))
         await session.flush()
         return await plan_payload(session, user)
 
@@ -330,7 +341,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     ) -> dict:
         require_step(user, OnboardingStep.TACTICS)
         tactic = await own_tactic(session, user, tactic_id)
-        tactic.text, tactic.weeks = clean_tactic(body)
+        tactic.text, tactic.weeks, tactic.days = clean_tactic(body)
         await session.flush()
         return await plan_payload(session, user)
 
@@ -371,7 +382,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                 {
                     "id": t.id,
                     "text": t.text,
-                    "label": tactics.weeks_label(t.weeks),
+                    "label": tactics.weeks_label(t.weeks, t.days),
                     "priority_position": t.priority.position,
                     "priority_title": t.priority.title,
                     "done": marks.get(t.id),

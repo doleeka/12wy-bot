@@ -34,6 +34,13 @@ def test_weeks_helpers():
     assert tactics.weeks_label(None) == "каждую неделю"
     assert tactics.weeks_label([5]) == "неделя 5"
     assert tactics.weeks_label([1, 2, 3, 4, 8, 11, 12]) == "недели 1–4, 8, 11–12"
+    assert tactics.normalize_days([4, 0, 2, 2]) == [0, 2, 4] and tactics.normalize_days(None) is None
+    for bad in ([], [-1], [7]):
+        with pytest.raises(ValueError):
+            tactics.normalize_days(bad)
+    assert tactics.weeks_label(None, [0, 2, 4]) == "каждую неделю · пн, ср, пт"
+    assert tactics.weeks_label(None, list(range(7))) == "каждый день"
+    assert tactics.weeks_label([4], [0]) == "неделя 4"  # у недельных — без дней
 
 
 async def test_tactics_crud_and_plan(api, sessionmaker):  # noqa: F811
@@ -44,21 +51,23 @@ async def test_tactics_crud_and_plan(api, sessionmaker):  # noqa: F811
     assert plan["max_per_priority"] == 8 and plan["weeks_total"] == 12
     assert date.fromisoformat(plan["cycle_start"]).weekday() == 0  # старт — понедельник
 
-    plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "3 тренировки по 30 минут"})).json()
+    plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "3 тренировки по 30 минут", "days": [4, 0, 2, 2]})).json()
     plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "Забег 5 км", "weeks": [4, 8, 12]})).json()
     plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[1], "text": "Сдать пробный тест", "weeks": [6]})).json()
-    plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[2], "text": "Больше заниматься проектом"})).json()
+    plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[2], "text": "Больше заниматься проектом", "days": [5]})).json()
     assert not plan["priorities"][2]["tactics"][0]["measurable"]  # регулярная без числа — подсказка
     t0, t1 = plan["priorities"][0]["tactics"]
-    assert t0["label"] == "каждую неделю" and t0["weeks"] is None and t0["measurable"]
+    assert t0["label"] == "каждую неделю · пн, ср, пт" and t0["weeks"] is None and t0["days"] == [0, 2, 4]
+    assert t0["measurable"]
+    assert t1["days"] is None  # у контрольных точек дней недели нет
     assert t1["label"] == "недели 4, 8, 12"
     assert plan["priorities"][1]["tactics"][0]["label"] == "неделя 6"
     assert plan["priorities"][1]["tactics"][0]["measurable"]  # разовая тактика — и так «да / нет»
     assert plan["load"][0] == 2 and plan["load"][3] == 3 and plan["load"][5] == 3 and plan["load"][11] == 3
 
     # правка и удаление
-    plan = (await api.put(f"/api/tactics/{t1['id']}", headers=h, json={"text": "Забег 10 км", "weeks": list(range(1, 13))})).json()
-    assert plan["priorities"][0]["tactics"][1] | {} == {**plan["priorities"][0]["tactics"][1], "label": "каждую неделю", "text": "Забег 10 км"}
+    plan = (await api.put(f"/api/tactics/{t1['id']}", headers=h, json={"text": "Забег 10 км", "weeks": list(range(1, 13)), "days": [6]})).json()
+    assert plan["priorities"][0]["tactics"][1] | {} == {**plan["priorities"][0]["tactics"][1], "label": "каждую неделю · вс", "text": "Забег 10 км"}
     plan = (await api.delete(f"/api/tactics/{t1['id']}", headers=h)).json()
     assert len(plan["priorities"][0]["tactics"]) == 1
 
@@ -70,6 +79,9 @@ async def test_tactics_crud_and_plan(api, sessionmaker):  # noqa: F811
         ({"text": "x" * 201}, "too_long"),
         ({"text": "ok", "weeks": []}, "bad_weeks"),
         ({"text": "ok", "weeks": [13]}, "bad_weeks"),
+        ({"text": "ok"}, "pick_days"),  # еженедельная — нужен день недели
+        ({"text": "ok", "days": []}, "bad_days"),
+        ({"text": "ok", "days": [7]}, "bad_days"),
     ],
 )
 async def test_tactic_validation(api, body, detail):  # noqa: F811
@@ -83,21 +95,21 @@ async def test_tactic_limit_and_ownership(api):  # noqa: F811
     other = await to_tactics(api, user_id=7)
     h = auth()
     for i in range(8):
-        await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": f"тактика {i}"})
-    r = await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "девятая"})
+        await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": f"тактика {i}", "days": [0]})
+    r = await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "девятая", "days": [0]})
     assert r.json()["detail"] == "limit"
     # чужой приоритет и чужая тактика
-    assert (await api.post("/api/tactics", headers=h, json={"priority_id": other[0], "text": "x"})).status_code == 404
-    theirs = (await api.post("/api/tactics", headers=auth(user_id=7), json={"priority_id": other[0], "text": "их"})).json()
+    assert (await api.post("/api/tactics", headers=h, json={"priority_id": other[0], "text": "x", "days": [0]})).status_code == 404
+    theirs = (await api.post("/api/tactics", headers=auth(user_id=7), json={"priority_id": other[0], "text": "их", "days": [0]})).json()
     tid = theirs["priorities"][0]["tactics"][0]["id"]
-    assert (await api.put(f"/api/tactics/{tid}", headers=h, json={"text": "моё"})).status_code == 404
+    assert (await api.put(f"/api/tactics/{tid}", headers=h, json={"text": "моё", "days": [0]})).status_code == 404
     assert (await api.delete(f"/api/tactics/{tid}", headers=h)).status_code == 404
 
 
 async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker):  # noqa: F811
     pids = await to_tactics(api)
     h = auth()
-    await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "3 тренировки"})
+    await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "3 тренировки", "days": [0, 2, 4]})
     assert (await api.post("/api/plan/confirm", headers=h)).json()["detail"] == "empty_priority"
     for pid in pids[1:]:
         await api.post("/api/tactics", headers=h, json={"priority_id": pid, "text": "2 часа в неделю", "weeks": [1, 2, 3]})
@@ -111,6 +123,6 @@ async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker):  # 
         assert user.cycle_start == svc.cycle_start_for(date.today())
 
     # после подтверждения план только для чтения (правки в середине цикла — отдельный шаг)
-    assert (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё"})).status_code == 409
+    assert (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})).status_code == 409
     assert (await api.post("/api/plan/confirm", headers=h)).status_code == 409
     assert (await api.get("/api/plan", headers=h)).json()["team"] == "Команда №1"

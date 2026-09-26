@@ -156,6 +156,7 @@ class WeeklyTactic(Base):
 
     weeks: None — каждую неделю (1–12); иначе список номеров недель, например [2, 6, 12]
     (контрольные точки) или [5] (разовая).
+    days: для еженедельных — дни недели (0 = пн … 6 = вс), например [0, 2, 4]; None — не указаны.
     """
 
     __tablename__ = "weekly_tactics"
@@ -165,6 +166,7 @@ class WeeklyTactic(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     text: Mapped[str] = mapped_column(Text)
     weeks: Mapped[list[int] | None] = mapped_column(JSON)
+    days: Mapped[list[int] | None] = mapped_column(JSON)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

@@ -19,6 +19,7 @@ from bot.handlers.cycle import summary_text
 from bot.models import OnboardingStep, User
 from bot.notify import safe_send
 from bot.services import checkins, cycle, scorecard
+from bot.services.tactics import days_label
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ async def send_week_planning(bot: Bot, sessionmaker: async_sessionmaker, setting
             tactics = await checkins.tactics_for_week(session, user, scorecard.week_start(today))
             if n is None or not tactics:
                 continue
-            lines = "\n".join(f"• {escape(t.text)}" for t in tactics)
+            lines = "\n".join(f"• {escape(t.text)}" + (f" — {days_label(t.days)}" if t.days else "") for t in tactics)
             if await safe_send(bot, user.telegram_id, texts.WEEK_PLANNING.format(n=n, tactics=lines)):
                 sent += 1
             await asyncio.sleep(SEND_DELAY)

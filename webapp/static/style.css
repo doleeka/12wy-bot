@@ -252,3 +252,13 @@ details.card ul { margin: 8px 0 4px; padding-left: 18px; color: var(--hint); }
 .result-value { font-size: 64px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .result-rating { font-size: 18px; font-weight: 600; margin: 4px 0; }
 .result .card { text-align: left; margin-top: 16px; white-space: pre-line; }
+
+/* дни недели для еженедельной тактики */
+#day-picker[hidden] { display: none; }
+.day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.day-grid button {
+  height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0;
+}
+.day-grid button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+#weeks-summary { margin-top: 8px; }

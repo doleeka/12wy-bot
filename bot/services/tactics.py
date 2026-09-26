@@ -11,6 +11,7 @@ ALL_WEEKS = list(range(1, CYCLE_WEEKS + 1))
 MAX_TACTICS_PER_PRIORITY = 8
 RECOMMENDED_MIN, RECOMMENDED_MAX = 3, 8
 MAX_TACTIC_LEN = 200
+WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]  # 0 = понедельник
 
 
 def normalize_weeks(weeks: Iterable[int] | None) -> list[int] | None:
@@ -23,6 +24,24 @@ def normalize_weeks(weeks: Iterable[int] | None) -> list[int] | None:
     return None if result == ALL_WEEKS else result
 
 
+def normalize_days(days: Iterable[int] | None) -> list[int] | None:
+    """Дни недели еженедельной тактики: отсортированный список 0–6 без повторов, хотя бы один."""
+    if days is None:
+        return None
+    result = sorted(set(days))
+    if not result or any(not 0 <= d <= 6 for d in result):
+        raise ValueError("Дни недели — от пн до вс, хотя бы один")
+    return result
+
+
+def days_label(days: list[int] | None) -> str:
+    if not days:
+        return ""
+    if len(days) == 7:
+        return "каждый день"
+    return ", ".join(WEEKDAYS[d] for d in days)
+
+
 def _ranges(weeks: list[int]) -> list[str]:
     parts, start = [], weeks[0]
     for prev, cur in zip(weeks, weeks[1:] + [None]):
@@ -32,9 +51,11 @@ def _ranges(weeks: list[int]) -> list[str]:
     return parts
 
 
-def weeks_label(weeks: list[int] | None) -> str:
+def weeks_label(weeks: list[int] | None, days: list[int] | None = None) -> str:
     if weeks is None:
-        return "каждую неделю"
+        if days and len(days) == 7:
+            return "каждый день"
+        return "каждую неделю" + (f" · {days_label(days)}" if days else "")
     if len(weeks) == 1:
         return f"неделя {weeks[0]}"
     return "недели " + ", ".join(_ranges(weeks))

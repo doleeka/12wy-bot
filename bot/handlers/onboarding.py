@@ -64,7 +64,8 @@ def plan_text(priorities: list[Priority]) -> str:
     blocks = []
     for p in priorities:
         tactics = "\n".join(
-            texts.PLAN_TACTIC.format(text=escape(t.text)) + ("" if t.weeks is None else f" <i>({weeks_label(t.weeks)})</i>")
+            texts.PLAN_TACTIC.format(text=escape(t.text))
+            + ("" if t.weeks is None and not t.days else f" <i>({weeks_label(t.weeks, t.days)})</i>")
             for t in p.tactics
             if t.is_active
         )

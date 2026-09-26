@@ -86,3 +86,22 @@ async def test_week_without_planned_tactics_is_buffer(sessionmaker):
     assert markup is None and "буфер" in text
     # в понедельник напоминание не шлём — на эту неделю ничего не запланировано
     assert await send_week_planning(make_bot(), sessionmaker, settings()) == 0
+
+
+async def test_planning_message_shows_weekdays(sessionmaker):
+    async with sessionmaker() as session:
+        user = User(telegram_id=3, onboarding_step=OnboardingStep.DONE, cycle_start=THIS_WEEK)
+        session.add(user)
+        await session.flush()
+        p = Priority(user_id=user.id, position=1, title="Спорт")
+        session.add(p)
+        await session.flush()
+        session.add_all([
+            WeeklyTactic(priority_id=p.id, user_id=user.id, text="Тренировка", days=[0, 2, 4]),
+            WeeklyTactic(priority_id=p.id, user_id=user.id, text="Старая тактика из чата"),  # без дней
+        ])
+        await session.commit()
+    bot = make_bot()
+    await send_week_planning(bot, sessionmaker, settings())
+    text = bot.send_message.call_args.args[1]
+    assert "• Тренировка — пн, ср, пт" in text and "• Старая тактика из чата\n" in text + "\n"

@@ -513,6 +513,8 @@
   // ---------- Тактики ----------
 
   const MEASURABLE = /\d|раз|кажд|ежедн|минут|час|страниц|шаг|км|километр|тренировк|сесси|урок/i;
+  const DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const DAYS_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
   const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
   function formatDate(iso) {
@@ -624,6 +626,7 @@
       tacticId: tactic ? tactic.id : null,
       mode: weeks == null ? "every" : weeks.length === 1 ? "one" : "some",
       weeks: new Set(weeks || []),
+      days: new Set((tactic && tactic.days) || []),
     };
     show("screen-tactic-edit");
     $("#edit-priority").textContent = priority.position + ". " + priority.title;
@@ -642,7 +645,7 @@
     if (!text) return false;
     if (e.mode === "some") return e.weeks.size >= 1;
     if (e.mode === "one") return e.weeks.size === 1;
-    return true;
+    return e.days.size >= 1; // еженедельная — нужен хотя бы один день
   }
 
   function renderEditor() {
@@ -666,9 +669,28 @@
         grid.appendChild(b);
       }
     }
+    // дни недели — только для еженедельной тактики
+    $("#day-picker").hidden = e.mode !== "every";
+    const dayGrid = $("#day-grid");
+    dayGrid.innerHTML = "";
+    DAYS.forEach((name, d) => {
+      const b = el2("button", null, name);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(e.days.has(d)));
+      b.setAttribute("aria-label", DAYS_FULL[d]);
+      b.addEventListener("click", () => {
+        e.days.has(d) ? e.days.delete(d) : e.days.add(d);
+        haptic.tick();
+        renderEditor();
+      });
+      dayGrid.appendChild(b);
+    });
+    const days = Array.from(e.days).sort((a, b) => a - b);
     const sorted = Array.from(e.weeks).sort((a, b) => a - b);
     $("#weeks-summary").textContent =
-      e.mode === "every" ? "Все 12 недель — регулярная тактика." :
+      e.mode === "every" ? (!days.length ? "Выбери дни — например, пн, ср, пт для «3 тренировок»." :
+        days.length === 7 ? "Каждый день, все 12 недель." :
+        "Каждую неделю: " + days.map((d) => DAYS[d].toLowerCase()).join(", ") + ".") :
       !sorted.length ? (e.mode === "one" ? "Выбери неделю." : "Отметь недели — например, 4, 8 и 12 как контрольные точки.") :
       (sorted.length === 1 ? "Неделя " : "Недели ") + sorted.join(", ");
     const text = $("#tactic-text").value.trim();
@@ -680,7 +702,12 @@
   async function saveTactic() {
     if (!editorValid()) return;
     const e = state.edit;
-    const body = { text: $("#tactic-text").value.trim(), weeks: e.mode === "every" ? null : Array.from(e.weeks) };
+    const every = e.mode === "every";
+    const body = {
+      text: $("#tactic-text").value.trim(),
+      weeks: every ? null : Array.from(e.weeks),
+      days: every ? Array.from(e.days) : null,
+    };
     tg.MainButton.showProgress();
     try {
       state.plan = e.tacticId
@@ -951,6 +978,8 @@
       empty_priority: "В каждом приоритете нужна хотя бы одна тактика.",
       limit: "Это максимум — меньше, но лучше.",
       bad_weeks: "Выбери хотя бы одну неделю.",
+      pick_days: "Выбери хотя бы один день недели.",
+      bad_days: "Выбери хотя бы один день недели.",
     };
     tg.showAlert(messages[e.detail] || "Не получилось. Проверь интернет и попробуй ещё раз.");
   }
@@ -985,6 +1014,7 @@
       e.mode = b.dataset.mode;
       if (e.mode === "one" && e.weeks.size > 1) e.weeks = new Set([Math.min(...e.weeks)]);
       if (e.mode === "every") e.weeks = new Set();
+      else e.days = new Set();
       haptic.tick();
       renderEditor();
     }));
