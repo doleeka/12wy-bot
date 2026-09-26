@@ -1,6 +1,7 @@
 """FastAPI: API для Mini App и статика фронтенда. Работает в одном процессе с ботом (см. bot.main)."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
@@ -10,14 +11,14 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.utils.web_app import WebAppInitData
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
-from bot.models import EssentialIntent, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
+from bot.models import EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
@@ -201,6 +202,22 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             raise HTTPException(status_code=422, detail="limit")
         added = await svc.add_explore_items(session, user, texts)
         return await explore_payload(session, user) | {"added": added}
+
+    @app.put("/api/explore/{item_id}")
+    async def edit_explore(
+        item_id: int, body: ExploreIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        """Исправить пункт прямо в карточке (до выбора трёх приоритетов)."""
+        require_step(user, *EXPLORE_EDITABLE_STEPS)
+        text = body.text.strip()[: svc.MAX_ITEM_LEN]
+        if not text:
+            raise HTTPException(status_code=422, detail="empty")
+        item = await session.get(ExploreItem, item_id)
+        if item is None or item.user_id != user.id or item.cycle != user.cycle:
+            raise HTTPException(status_code=404, detail="no_item")
+        item.text = text
+        await session.flush()
+        return await explore_payload(session, user)
 
     @app.delete("/api/explore/{item_id}")
     async def delete_explore(item_id: int, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
@@ -546,9 +563,21 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
 
     # ---------- фронтенд ----------
 
+    # Метка версии в ссылках на app.js/style.css: WebView Telegram кэширует статику,
+    # и без метки после обновления участница видела бы новую разметку со старым кодом.
+    version = hashlib.sha256(
+        b"".join((STATIC_DIR / name).read_bytes() for name in ("app.js", "style.css", "index.html"))
+    ).hexdigest()[:10]
+    index_html = (
+        (STATIC_DIR / "index.html")
+        .read_text(encoding="utf-8")
+        .replace("/static/app.js", f"/static/app.js?v={version}")
+        .replace("/static/style.css", f"/static/style.css?v={version}")
+    )
+
     @app.get("/")
-    async def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    async def index() -> HTMLResponse:
+        return HTMLResponse(index_html, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
     @app.get("/healthz")
     async def healthz() -> dict:

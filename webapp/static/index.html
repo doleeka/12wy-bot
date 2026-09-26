@@ -9,6 +9,11 @@
 </head>
 <body>
   <main id="app">
+    <!-- Прогресс онбординга: «Шаг X из 6» — только на шагах первоначального плана -->
+    <header class="ob" id="ob-progress" hidden>
+      <div class="ob-top"><span id="ob-step"></span><span class="ob-method" id="ob-method"></span></div>
+      <div class="ob-bar" role="progressbar" aria-valuemin="1" aria-valuemax="6" id="ob-bar"><i id="ob-fill"></i></div>
+    </header>
     <!-- Загрузка -->
     <section class="screen" id="screen-loading">
       <p class="muted center">Загружаю…</p>
@@ -22,27 +27,26 @@
 
     <!-- Приветствие -->
     <section class="screen" id="screen-welcome" hidden>
-      <p class="eyebrow">12 Week Year × Essentialism</p>
-      <h1>Привет, <span data-name></span>! 🌿</h1>
-      <p>Ближайшие <b>12 недель</b> мы проживём как один сфокусированный год.</p>
-      <p class="muted">Когда горизонт короткий, исчезает «ещё успею в декабре»: каждая неделя на счету, а прогресс видно сразу — через чек-ин и процент выполнения.</p>
-
-      <h2>Зачем здесь Essentialism</h2>
-      <p class="muted">12 недель легко забить десятком целей — и выгореть к шестой. Эссенциализм — это фильтр: <i>меньше, но лучше</i>.</p>
+      <p class="eyebrow">Привет, <span data-name></span> 🌿</p>
+      <h1>Собери свой план на 12 недель</h1>
+      <p>За 5–7 минут определим 3 главных приоритета и превратим их в конкретные действия.</p>
       <ol class="steps">
-        <li><b>Explore</b><span>Сначала выпишем всё, что для тебя важно — без ограничений.</span></li>
-        <li><b>Eliminate</b><span>Оставим ровно <b>3</b> приоритета. Остальное — осознанное «не сейчас».</span></li>
-        <li><b>Execute</b><span>Превратим их в тактики на 12 недель и будем отмечать каждую неделю.</span></li>
+        <li><b>Оценишь, что происходит сейчас</b></li>
+        <li><b>Выберешь 3 главных направления</b></li>
+        <li><b>Составишь действия на ближайшие 12 недель</b></li>
       </ol>
-      <p class="muted">А ещё у тебя будет маленькая команда — до 3 человек — чтобы поддерживать друг друга.</p>
-      <p>Начнём с <b>колеса баланса</b> — это пара минут.</p>
+      <p class="muted">Ничего не нужно формулировать идеально — план можно изменить позже.</p>
+      <details class="card more">
+        <summary>Почему только 3 приоритета?</summary>
+        <p>12 недель легко забить десятком целей — и выгореть к шестой. Когда главного мало, на него хватает сил: <i>меньше, но лучше</i>. Остальное никуда не денется — мы сохраним его в «Не сейчас».</p>
+        <p class="muted small">Метод: The 12 Week Year + Essentialism.</p>
+      </details>
     </section>
 
     <!-- Колесо баланса -->
     <section class="screen" id="screen-wheel" hidden>
-      <p class="eyebrow">Шаг 1 · Колесо баланса</p>
       <h1>Как ты сейчас?</h1>
-      <p class="muted">Оцени каждую сферу от 1 до 10. Не думай долго — первая цифра обычно самая честная.</p>
+      <p class="muted">Оцени каждую сферу от 1 до 10. Первая цифра обычно самая честная.</p>
 
       <figure class="chart" aria-label="Колесо баланса">
         <svg id="radar" role="img"></svg>
@@ -56,14 +60,13 @@
       <div id="sphere-list" class="spheres"></div>
 
       <div class="extras">
-        <h2>Ещё сферы <span class="muted small">— по желанию, до 2</span></h2>
-        <div id="extra-chips" class="chips"></div>
+        <button class="add-sphere" id="toggle-extras" type="button">+ Добавить сферу <span class="muted small">— по желанию</span></button>
+        <div id="extra-chips" class="chips" hidden></div>
       </div>
     </section>
 
     <!-- Итог колеса -->
     <section class="screen" id="screen-wheel-done" hidden>
-      <p class="eyebrow">Колесо баланса</p>
       <h1>Твоё колесо</h1>
       <figure class="chart">
         <svg id="radar-done" role="img"></svg>
@@ -72,58 +75,52 @@
           <span><i class="swatch before"></i>12 недель назад</span>
         </figcaption>
       </figure>
-      <div class="stat"><span class="stat-value" id="avg"></span><span class="muted">средний балл</span></div>
-      <div id="lows" class="card"></div>
-      <div id="comparison" class="card" hidden></div>
-      <p class="muted">Это не оценка тебя — это карта. Просадки часто подсказывают, где сейчас живут самые важные изменения.</p>
-      <div class="card accent">
-        <b>Дальше — Explore 🔭</b>
-        <p class="muted">Сначала расширяем, потом режем: выпишем всё, что для тебя сейчас важно.</p>
+      <div class="extremes">
+        <div class="card"><span class="muted small">Самая низкая оценка сейчас</span><b id="wheel-low"></b></div>
+        <div class="card"><span class="muted small">Самая высокая</span><b id="wheel-high"></b></div>
       </div>
+      <div id="comparison" class="card" hidden></div>
+      <p class="muted">Это не диагноз и не рейтинг жизни. Колесо помогает заметить, куда сейчас уходит меньше внимания.</p>
       <button class="link" id="edit-wheel">Изменить оценки</button>
     </section>
 
     <!-- Explore -->
     <section class="screen" id="screen-explore" hidden>
-      <p class="eyebrow">Шаг 2 · Explore</p>
       <h1>Что для тебя важно прямо сейчас?</h1>
-      <p class="muted">Сейчас только расширяем. Цели, мечты, то, что давно откладываешь, то, что болит — без ограничений и без оценки «реально / нереально».</p>
-      <div class="card" id="explore-hints" hidden></div>
+      <p class="muted">Напиши всё, что хочешь изменить, закончить, попробовать или получить. Без ограничений — выбирать будем на следующем шаге.</p>
+      <div class="chips quick" id="explore-quick" aria-label="Быстрые темы"></div>
       <form class="add-row" id="explore-form" autocomplete="off">
-        <textarea id="explore-input" rows="1" maxlength="1000" placeholder="Например: выучить английский" aria-label="Новый пункт"></textarea>
+        <textarea id="explore-input" rows="1" maxlength="1000" aria-label="Новый пункт"></textarea>
         <button type="submit" class="add-btn" aria-label="Добавить">＋</button>
       </form>
-      <p class="muted small">Можно вставить сразу список — каждый пункт с новой строки.</p>
+      <p class="muted small">Каждый пункт — с новой строки. Нажми на пункт, чтобы исправить.</p>
+      <div class="card" id="explore-hints" hidden></div>
       <ul class="items" id="explore-list"></ul>
-      <p class="muted small" id="explore-count"></p>
       <button class="link" id="show-wheel">Посмотреть моё колесо</button>
     </section>
 
     <!-- Eliminate -->
     <section class="screen" id="screen-eliminate" hidden>
-      <p class="eyebrow">Шаг 3 · Eliminate</p>
-      <h1>Оставь ровно 3</h1>
-      <p class="muted">Самое сложное и самое важное: три приоритета на ближайшие 12 недель. Не 4 и не 5.</p>
-      <div class="card accent"><b>Если это не однозначное «да» — это «нет».</b>
-        <p class="muted">Остальное не исчезает — это осознанное «не сейчас».</p></div>
-      <p class="counter" id="eliminate-count"></p>
+      <h1>Выбери 3 главных</h1>
+      <p class="muted">Выбери 3 вещи, которым готова уделять время следующие 12 недель.</p>
+      <div class="card soft">Остальное мы сохраним в «Не сейчас» — ты ничего не теряешь.</div>
       <div class="checks" id="eliminate-list"></div>
       <button class="link" id="back-to-explore">← Дописать в список</button>
     </section>
 
     <!-- Essential intent -->
     <section class="screen" id="screen-intent" hidden>
-      <p class="eyebrow">Шаг 4 · Essential intent</p>
       <h1>Зачем тебе это?</h1>
-      <p class="muted">Не «надо», а <i>зачем</i>. Как каждый приоритет связан с тем, какой ты хочешь видеть свою жизнь — через год, через пять лет? На 5-й неделе, когда мотивация просядет, именно этот ответ удержит тебя.</p>
-      <details class="card" id="not-now" hidden><summary><b>Осознанное «не сейчас»</b></summary><ul></ul>
-        <p class="muted small">Это не провал — это место для главного.</p></details>
+      <p class="muted">Для каждого приоритета — почему он важен. Когда на 5-й неделе станет тяжело, этот ответ удержит.</p>
+      <div class="card soft example"><span class="muted small">Пример</span>«Хочу создать стабильный источник дохода, чтобы через год меньше зависеть от основной работы.»</div>
+      <p class="muted small">Не ищи красивую формулировку. Напиши честно.</p>
       <div id="intent-list"></div>
+      <details class="card more" id="not-now" hidden><summary>Осознанное «не сейчас»</summary><ul></ul>
+        <p class="muted small">Эти пункты сохранены — к ним можно вернуться в следующем цикле.</p></details>
     </section>
 
     <!-- Тактики -->
     <section class="screen" id="screen-tactics" hidden>
-      <p class="eyebrow">Шаг 5 · Тактики</p>
       <h1>Что ты будешь делать?</h1>
       <p class="muted">Цель — это куда. Тактика — это действие, по которому в конце недели можно честно ответить «да» или «нет».</p>
       <div class="card">
@@ -248,6 +245,8 @@
       <p class="muted">Скоро здесь появятся 12-недельный план, чек-ины с историей и твоя команда.</p>
     </section>
   </main>
+  <!-- Состояние под главной кнопкой: «Оценено 3 из 6», «Выбрано 2 из 3» -->
+  <div class="cta-status" id="cta-status" hidden></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

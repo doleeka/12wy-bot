@@ -103,3 +103,14 @@ async def test_cannot_delete_foreign_item(api, sessionmaker):  # noqa: F811
     other = (await api.post("/api/explore", headers=auth(user_id=7), json={"text": "чужое"})).json()["items"][0]["id"]
     await api.delete(f"/api/explore/{other}", headers=auth())
     assert len((await api.get("/api/explore", headers=auth(user_id=7))).json()["items"]) == 1
+
+
+async def test_edit_explore_item(api):  # noqa: F811
+    await to_explore(api)
+    data = (await api.post("/api/explore", headers=auth(), json={"text": "Спорт"})).json()
+    item = data["items"][0]["id"]
+    data = (await api.put(f"/api/explore/{item}", headers=auth(), json={"text": "  Бег по утрам  "})).json()
+    assert [i["text"] for i in data["items"]] == ["Бег по утрам"]
+    assert (await api.put(f"/api/explore/{item}", headers=auth(), json={"text": " "})).json()["detail"] == "empty"
+    await api.put("/api/wheel", headers=auth(user_id=7), json={"scores": CORE})
+    assert (await api.put(f"/api/explore/{item}", headers=auth(user_id=7), json={"text": "чужое"})).status_code == 404

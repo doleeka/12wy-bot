@@ -148,3 +148,14 @@ async def test_menu_button():
     await set_webapp_menu_button(bot, Settings(bot_token=TOKEN, database_path=None))
     first, second = tg.of_type(SetChatMenuButton)
     assert first.menu_button.web_app.url == "https://app.example" and second.menu_button.type == "commands"
+
+
+async def test_static_assets_are_versioned(api):  # noqa: F811
+    """Ссылки на app.js/style.css с меткой версии — чтобы Telegram не держал старый код в кэше."""
+    import re
+
+    r = await api.get("/")
+    assert "no-store" in r.headers["cache-control"]
+    versions = re.findall(r"/static/(?:app\.js|style\.css)\?v=([0-9a-f]{10})", r.text)
+    assert len(versions) == 2 and len(set(versions)) == 1
+    assert (await api.get(f"/static/app.js?v={versions[0]}")).status_code == 200

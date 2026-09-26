@@ -1,4 +1,4 @@
-/* Mini App «12 недель»: приветствие и колесо баланса. Чистый JS, без сборки. */
+/* Mini App «12 недель». Чистый JS, без сборки. */
 (function () {
   "use strict";
 
@@ -13,11 +13,21 @@
 
   // ---------- Telegram ----------
 
+  // Цвета — свои (бордовый бренд), от Telegram берём только светлую/тёмную схему
+  const BRAND = { light: { bg: "#FCFAF9", button: "#7A1F2B", off: "#B9B1AE" }, dark: { bg: "#1C1718", button: "#8E2433", off: "#4A4142" } };
+  const scheme = () => (document.documentElement.dataset.theme === "dark" ? BRAND.dark : BRAND.light);
+
   function applyTheme() {
     if (!tg) return;
     document.documentElement.dataset.theme = tg.colorScheme === "dark" ? "dark" : "light";
+    try {
+      tg.setHeaderColor(scheme().bg);
+      tg.setBackgroundColor(scheme().bg);
+      if (tg.setBottomBarColor) tg.setBottomBarColor(scheme().bg);
+    } catch (_) { /* старые клиенты Telegram */ }
   }
 
+  // Один главный CTA на экран: глагол + результат. Почему недоступна — объясняет строка состояния (status)
   function mainButton(text, onClick, enabled = true) {
     if (!tg) return;
     const mb = tg.MainButton;
@@ -25,10 +35,50 @@
     mainHandler = onClick;
     mb.setText(text);
     enabled ? mb.enable() : mb.disable();
-    mb.setParams({ is_active: enabled, color: enabled ? tg.themeParams.button_color : tg.themeParams.hint_color });
+    mb.setParams({ is_active: enabled, color: enabled ? scheme().button : scheme().off, text_color: "#FFFFFF" });
     mb.onClick(onClick);
     mb.show();
   }
+
+  // Строка состояния под кнопкой: «Оценено 3 из 6», «Выбрано 2 из 3»
+  function status(text, ok = false) {
+    const el = $("#cta-status");
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.classList.toggle("ok", ok);
+    document.body.classList.toggle("has-status", !!text);
+  }
+
+  // Шаги первоначального плана: номер, русское название, метод — вторичным текстом
+  const STEPS = {
+    "screen-wheel": [1, "Оцени", "Колесо баланса"],
+    "screen-wheel-done": [1, "Оцени", "Колесо баланса"],
+    "screen-explore": [2, "Выгрузи", "Explore"],
+    "screen-eliminate": [3, "Выбери 3", "Eliminate"],
+    "screen-intent": [4, "Определи зачем", "Essential intent"],
+    "screen-tactics": [5, "Действия", "Execute"],
+    "screen-tactic-edit": [5, "Действия", "Execute"],
+    "screen-priority-edit": [5, "Действия", "Execute"],
+    "screen-plan": [6, "Проверка", "Итоговый план"],
+  };
+
+  function onboardingProgress(id) {
+    const info = STEPS[id];
+    const inOnboarding = state.me && !["done", "finished"].includes(state.me.step);
+    const header = $("#ob-progress");
+    header.hidden = !(info && inOnboarding);
+    if (header.hidden) return;
+    const [n, name, method] = info;
+    $("#ob-step").textContent = "Шаг " + n + " из 6 · " + name;
+    $("#ob-method").textContent = method;
+    $("#ob-fill").style.width = (n / 6) * 100 + "%";
+    $("#ob-bar").setAttribute("aria-valuenow", String(n));
+  }
+
+  const plural = (n, one, few, many) => {
+    const m10 = n % 10, m100 = n % 100;
+    return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+  };
 
   function backButton(onClick) {
     if (!tg) return;
@@ -69,6 +119,8 @@
 
   function show(id) {
     document.querySelectorAll(".screen").forEach((s) => (s.hidden = s.id !== id));
+    status(null);
+    onboardingProgress(id);
     window.scrollTo(0, 0);
   }
 
@@ -82,7 +134,7 @@
   function showWelcome() {
     show("screen-welcome");
     backButton(null);
-    mainButton("Начать с колеса баланса", showWheel);
+    mainButton("Начать · ~5 минут", showWheel);
   }
 
   // ---------- колесо: данные ----------
@@ -207,7 +259,7 @@
       const rated = state.touched.has(s.key);
       row.classList.toggle("unrated", !rated);
       row.classList.toggle("low", rated && isLow(state.scores[s.key]));
-      row.querySelector(".sphere-value").textContent = rated ? state.scores[s.key] : "—";
+      row.querySelector(".sphere-value").textContent = rated ? state.scores[s.key] + "/10" : "—";
     };
     const onInput = () => {
       const v = Number(input.value);
@@ -227,6 +279,10 @@
   function renderChips() {
     const box = $("#extra-chips");
     box.innerHTML = "";
+    // доп. сферы спрятаны под «+ Добавить сферу» — чтобы не выглядели обязательными
+    const toggle = $("#toggle-extras");
+    toggle.hidden = state.extras.length >= state.wheel.max_extra;
+    if (toggle.hidden) box.hidden = true;
     const full = state.extras.length >= state.wheel.max_extra;
     state.wheel.spheres.filter((s) => !s.core && !state.extras.includes(s.key)).forEach((s) => {
       const chip = document.createElement("button");
@@ -246,8 +302,16 @@
     state.touched.forEach((k) => (scores[k] = state.scores[k]));
     drawRadar($("#radar"), activeSpheres(), scores, state.wheel.comparison, $("#radar-tip"));
     $("#radar-legend").hidden = !state.wheel.comparison.length;
+    const core = coreSpheres();
+    const rated = core.filter((s) => state.touched.has(s.key)).length;
     const left = unratedCount();
-    mainButton(left ? "Оцени ещё " + left : "Сохранить колесо", saveWheel, left === 0);
+    mainButton("Продолжить", saveWheel, left === 0);
+    status(
+      left === 0 ? "Всё оценено ✓" :
+      rated < core.length ? "Оценено " + rated + " из " + core.length + " обязательных" :
+      "Оцени и добавленную сферу — или убери её",
+      left === 0,
+    );
   }
 
   function renderWheel() {
@@ -293,11 +357,13 @@
     const ordered = w.spheres.filter((s) => spheres.includes(s));
     drawRadar($("#radar-done"), ordered, w.scores, w.comparison, null);
     $("#radar-done-legend").hidden = !w.comparison.length;
-    $("#avg").textContent = String(w.average).replace(".", ",");
-
-    const lows = w.lows.map((k) => sphereByKey(k).emoji + " " + sphereByKey(k).title + " (" + w.scores[k] + ")");
-    $("#lows").innerHTML = "<b>Где просадки</b><p></p>";
-    $("#lows p").textContent = lows.join(", ");
+    // не «средний балл» (звучит как оценка жизни), а где меньше и больше всего внимания
+    const entries = ordered.map((s) => [s, w.scores[s.key]]);
+    const min = Math.min(...entries.map((e) => e[1]));
+    const max = Math.max(...entries.map((e) => e[1]));
+    const names = (v) => entries.filter((e) => e[1] === v).slice(0, 2).map(([s]) => s.emoji + " " + s.title).join(", ") + " " + v + "/10";
+    $("#wheel-low").textContent = names(min);
+    $("#wheel-high").textContent = names(max);
 
     const cmp = $("#comparison");
     cmp.hidden = !w.comparison.length;
@@ -311,7 +377,7 @@
         cmp.querySelector("ul").appendChild(li);
       });
     }
-    mainButton("Дальше: Explore", showExplore);
+    mainButton("Продолжить", showExplore);
   }
 
   // ---------- Explore ----------
@@ -321,11 +387,44 @@
     ta.style.height = ta.scrollHeight + "px";
   }
 
+  const QUICK = ["Работа", "Деньги", "Здоровье", "Отношения", "Учёба", "Проект", "Переезд"];
+  const EXAMPLES = ["найти стажировку", "запустить сайт", "начать тренироваться", "увеличить доход", "познакомиться с новыми людьми"];
+
+  function renderQuick() {
+    const box = $("#explore-quick");
+    if (box.childElementCount) return;
+    QUICK.forEach((q) => {
+      const chip = el2("button", "chip", q);
+      chip.type = "button";
+      // тема — начало мысли: подставляем в поле и даём дописать
+      chip.addEventListener("click", () => {
+        const input = $("#explore-input");
+        input.value = q + ": ";
+        input.focus();
+        autosize(input);
+      });
+      box.appendChild(chip);
+    });
+  }
+
+  async function saveExploreEdit(item, span) {
+    const text = span.textContent.trim();
+    span.contentEditable = "false";
+    if (!text || text === item.text) { span.textContent = item.text; return; }
+    try {
+      state.explore = await api("PUT", "/api/explore/" + item.id, { text });
+      renderExplore();
+    } catch (e) { span.textContent = item.text; failed(e); }
+  }
+
   function renderExplore() {
     const d = state.explore;
+    renderQuick();
+    const input = $("#explore-input");
+    if (!input.placeholder) input.placeholder = "Например: " + EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
     const hints = [];
-    if (d.lows.length) hints.push("<b>Просадки колеса:</b> <span data-t='lows'></span>");
-    if (d.previous.length) hints.push("<b>Прошлые приоритеты:</b> <span data-t='prev'></span> — можно вписать снова, если это всё ещё однозначное «да».");
+    if (d.lows.length) hints.push("<b>Подсказка из колеса:</b> <span data-t='lows'></span>");
+    if (d.previous.length) hints.push("<b>Прошлые приоритеты:</b> <span data-t='prev'></span> — можно вписать снова, если это всё ещё важно.");
     const box = $("#explore-hints");
     box.hidden = !hints.length;
     box.innerHTML = hints.map((h) => "<p>" + h + "</p>").join("");
@@ -337,7 +436,19 @@
     d.items.forEach((item) => {
       const li = document.createElement("li");
       li.innerHTML = "<span></span><button aria-label='Удалить'>×</button>";
-      li.querySelector("span").textContent = item.text;
+      const span = li.querySelector("span");
+      span.textContent = item.text;
+      // нажатие на пункт — исправить прямо в карточке; Enter или уход из поля — сохранить
+      span.addEventListener("click", () => {
+        if (span.contentEditable === "true") return;
+        span.contentEditable = "true";
+        span.focus();
+        document.getSelection().selectAllChildren(span);
+      });
+      span.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); span.blur(); }
+      });
+      span.addEventListener("blur", () => saveExploreEdit(item, span));
       li.querySelector("button").addEventListener("click", async () => {
         try {
           state.explore = await api("DELETE", "/api/explore/" + item.id);
@@ -348,9 +459,14 @@
       list.appendChild(li);
     });
     const n = d.items.length;
-    $("#explore-count").textContent = n ? "В списке: " + n : "";
     const left = d.min - n;
-    mainButton(left > 0 ? "Добавь ещё " + left : "Дальше: выбрать " + d.pick, exploreDone, left <= 0);
+    mainButton("Выбрать " + d.pick + " приоритета", exploreDone, left <= 0);
+    status(
+      !n ? "Нужно хотя бы " + d.min + " пункта — чтобы было из чего выбирать" :
+      left > 0 ? "Добавлено " + n + " " + plural(n, "пункт", "пункта", "пунктов") + " · ещё " + left + ", чтобы было из чего выбрать" :
+      "Добавлено " + n + " " + plural(n, "пункт", "пункта", "пунктов") + " ✓",
+      left <= 0,
+    );
   }
 
   async function addExplore(ev) {
@@ -400,7 +516,7 @@
       const on = picked.has(item.id);
       const label = document.createElement("label");
       label.className = "check" + (on ? " on" : full ? " off" : "");
-      label.innerHTML = "<input type='checkbox'><span></span>";
+      label.innerHTML = "<input type='checkbox'><i class='tick' aria-hidden='true'>✓</i><span></span>";
       const box = label.querySelector("input");
       box.checked = on;
       box.disabled = !on && full; // после третьей остальные заблокированы
@@ -412,9 +528,9 @@
       });
       list.appendChild(label);
     });
-    $("#eliminate-count").textContent = "Выбрано " + picked.size + " из " + d.pick;
     const left = d.pick - picked.size;
-    mainButton(left ? "Выбери ещё " + left : "Оставить эти " + d.pick, confirmEliminate, left === 0);
+    mainButton("Продолжить", confirmEliminate, left === 0);
+    status("Выбрано " + picked.size + " из " + d.pick + (left === 0 ? " ✓" : ""), left === 0);
   }
 
   async function showEliminate() {
@@ -443,9 +559,21 @@
     return state.intent.priorities.every((p) => (state.drafts[p.title] || "").trim().length >= state.intent.min_len);
   }
 
+  const DRAFTS_KEY = () => "12w-intent-drafts-" + (tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "");
+
+  function saveDrafts() {
+    try { localStorage.setItem(DRAFTS_KEY(), JSON.stringify(state.drafts)); } catch (_) { /* приватный режим и т.п. */ }
+  }
+
+  function loadDrafts() {
+    try { return JSON.parse(localStorage.getItem(DRAFTS_KEY()) || "{}") || {}; } catch (_) { return {}; }
+  }
+
   function refreshIntentButton() {
-    const left = state.intent.priorities.filter((p) => (state.drafts[p.title] || "").trim().length < state.intent.min_len).length;
-    mainButton(left ? "Ответь ещё на " + left : "Сохранить «зачем»", saveIntent, left === 0);
+    const total = state.intent.priorities.length;
+    const ready = state.intent.priorities.filter((p) => (state.drafts[p.title] || "").trim().length >= state.intent.min_len).length;
+    mainButton("Продолжить к действиям", saveIntent, ready === total);
+    status("Готово " + ready + " из " + total + (ready === total ? " ✓" : ""), ready === total);
   }
 
   function renderIntent() {
@@ -458,8 +586,9 @@
 
     const list = $("#intent-list");
     list.innerHTML = "";
+    const stored = loadDrafts();
     d.priorities.forEach((p) => {
-      if (state.drafts[p.title] == null) state.drafts[p.title] = p.intent || "";
+      if (state.drafts[p.title] == null) state.drafts[p.title] = p.intent || stored[p.title] || "";
       const wrap = document.createElement("div");
       wrap.className = "intent";
       wrap.innerHTML = "<label></label><textarea maxlength='2000'></textarea><div class='hint'></div>";
@@ -468,16 +597,17 @@
       wrap.querySelector("label").setAttribute("for", id);
       const ta = wrap.querySelector("textarea");
       ta.id = id;
-      ta.placeholder = "Почему это для тебя важно? Что изменится, когда получится?";
+      ta.placeholder = "Почему это важно? Что изменится, когда получится?";
       ta.value = state.drafts[p.title];
       const hint = wrap.querySelector(".hint");
       const update = () => {
         const left = d.min_len - ta.value.trim().length;
-        hint.textContent = left > 0 ? "Ещё " + left + " симв. — чуть подробнее, чем «надо»" : "✓ Принято";
+        hint.textContent = left > 0 ? "Ещё " + left + " симв. — пару слов о том, зачем" : "✓ Готово";
         hint.classList.toggle("ok", left <= 0);
       };
       ta.addEventListener("input", () => {
         state.drafts[p.title] = ta.value;
+        saveDrafts();
         update();
         refreshIntentButton();
       });
@@ -611,9 +741,15 @@
     renderGrid($("#tactics-grid"), plan);
     $("#buffer-hint").textContent = bufferText(plan);
     const missing = plan.priorities.find((p) => !p.tactics.length);
-    const doneLabel = planConfirmed() ? "Готово" : "Проверить план";
+    const doneLabel = planConfirmed() ? "Готово" : "Посмотреть итоговый план";
     const next = planConfirmed() ? () => showPlan("view") : () => showPlan("review");
-    mainButton(missing ? "Добавь тактику в «" + missing.title.slice(0, 24) + "»" : doneLabel, next, !missing);
+    const withTactics = plan.priorities.filter((p) => p.tactics.length).length;
+    mainButton(doneLabel, next, !missing);
+    status(
+      missing ? "Действия есть в " + withTactics + " из " + plan.priorities.length + " приоритетов · добавь в «" + missing.title.slice(0, 24) + "»"
+              : "Действия есть во всех " + plan.priorities.length + " приоритетах ✓",
+      !missing,
+    );
   }
 
   const planConfirmed = () => state.plan && state.plan.step === "done";
@@ -810,6 +946,8 @@
     if (review) {
       backButton(showTactics);
       mainButton("Подтвердить план", confirmPlan);
+      const count = plan.priorities.reduce((n, p) => n + p.tactics.length, 0);
+      status(plan.priorities.length + " приоритета · " + count + " " + plural(count, "действие", "действия", "действий") + " · старт " + formatDate(plan.cycle_start), true);
     } else {
       backButton(showHome);
       mainButton("На главную", showHome);
@@ -1068,6 +1206,10 @@
     }));
     $("#delete-tactic").addEventListener("click", deleteTactic);
     $("#edit-plan").addEventListener("click", showTactics);
+    $("#toggle-extras").addEventListener("click", () => {
+      const box = $("#extra-chips");
+      box.hidden = !box.hidden;
+    });
     $("#open-plan").addEventListener("click", openPlanView);
     $("#plan-edit").addEventListener("click", showTactics);
     $("#plan-reselect").addEventListener("click", () => {
