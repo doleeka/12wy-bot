@@ -14,6 +14,18 @@ python -m bot.main
 
 Тесты: `pytest`
 
+## Команды бота
+
+| Команда | Кто | Что делает |
+|---|---|---|
+| `/start` | все | онбординг / продолжить с текущего шага |
+| `/plan` | участница | мои приоритеты, «зачем» и тактики |
+| `/team` | участница | моя команда и % выполнения за неделю (только проценты) |
+| `/teams` | админ | все команды с telegram_id участниц |
+| `/moveteam <telegram_id> <team_id\|new>` | админ | перевести участницу в другую / новую команду |
+
+Админы задаются в `ADMIN_IDS`.
+
 ## Структура
 
 ```
@@ -26,7 +38,8 @@ bot/
   texts.py         все тексты бота
   keyboards.py     inline-клавиатуры
   handlers/        start.py (/start), wheel.py (колесо баланса),
-                   onboarding.py (Explore, Eliminate, Intent, тактики, /plan)
+                   onboarding.py (Explore, Eliminate, Intent, тактики, /plan),
+                   teams.py (/team, /teams, /moveteam)
   services/        бизнес-логика без привязки к Telegram
 tests/
 ```
@@ -40,7 +53,7 @@ tests/
 - [x] Настройка бота через `.env`
 - [x] `/start` + колесо баланса (6 основных сфер + до 2 дополнительных, визуализация и просадки)
 - [x] Explore → Eliminate (ровно 3) → Essential intent → Тактики, `/plan`
-- [ ] Автораспределение в команды (до 3 человек), `/moveteam`
+- [x] Автораспределение в команды (до 3 человек), `/team`, админские `/teams` и `/moveteam`
 - [ ] Еженедельный чек-ин и scorecard, `send_report`
 - [ ] Автобэкап базы админу (APScheduler)
 - [ ] Dockerfile + fly.toml с volume

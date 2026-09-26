@@ -137,12 +137,54 @@ ONBOARDING_DONE = (
     "Неделя 1 из 12 начинается в понедельник, <b>{start}</b>. "
     "Каждую неделю я буду присылать твои тактики для чек-ина, а ты — отмечать, что получилось.\n\n"
     "85%+ — отлично, 70–84% — хорошо, ниже 70% — повод разобраться, что помешало. "
-    "Не 100% — и это нормально.\n\n"
-    "Скоро познакомлю тебя с командой 🤝"
+    "Не 100% — и это нормально."
 )
 PLAN_PRIORITY = "<b>{n}. {title}</b>\n<i>Зачем:</i> {intent}\n{tactics}"
 PLAN_TACTIC = "   • {text}"
 PLAN_EMPTY = "План ещё не составлен — нажми /start, чтобы продолжить."
+
+
+# ---------- Команды ----------
+
+TEAM_PRIVACY = "Внутри команды видно только процент выполнения за неделю — без целей, тактик и приоритетов."
+TEAM_JOINED = (
+    "🤝 <b>Твоя команда — {team}</b>\n\n"
+    "{mates}\n\n"
+    "Это ваша маленькая WAM-группа: каждую неделю вы поддерживаете друг друга и видите, "
+    "как идут дела.\n" + TEAM_PRIVACY + "\n\n"
+    "Посмотреть команду: /team"
+)
+TEAM_MATES = "Сокомандницы: {names}"
+TEAM_FIRST = "Ты первая в этой команде — скоро к тебе присоединятся 🌱"
+TEAM_NEW_MEMBER = "🌱 В команде «{team}» новая участница: <b>{name}</b>. Поддержите её на старте!"
+TEAM_MEMBER_LEFT = "{name} перешла в другую команду."
+TEAM_MOVED = "Тебя перевели в команду <b>{team}</b> 🤝\n\n{mates}\n\nПосмотреть команду: /team"
+
+TEAM_NONE_YET = "Команда появится, когда ты закончишь онбординг — /start"
+TEAM_VIEW = "🤝 <b>{team}</b>\n{week}\n\n{rows}\n\n<i>" + TEAM_PRIVACY + "</i>"
+TEAM_WEEK = "Неделя {n} из 12"
+TEAM_WEEK_NOT_STARTED = "Цикл начнётся в понедельник, {start}"
+TEAM_WEEK_OVER = "12 недель позади 🎉"
+TEAM_ROW = "{emoji} {name}{you} — {current}{prev}"
+TEAM_NO_DATA = "ещё не отмечала"
+TEAM_PREV = " (прошлая: {value})"
+
+ADMIN_USER_READY = "✅ {name} (id {tg_id}) прошла онбординг → {team}{new}"
+ADMIN_ONLY = "Эта команда только для админа."
+ADMIN_MOVE_USAGE = (
+    "Использование: <code>/moveteam &lt;telegram_id&gt; &lt;team_id&gt;</code>\n"
+    "Вместо team_id можно написать <code>new</code> — создать новую команду.\n"
+    "Список команд и id: /teams"
+)
+ADMIN_USER_NOT_FOUND = "Участница с telegram_id {tg_id} не найдена."
+ADMIN_USER_NOT_READY = "{name} ещё не закончила онбординг — переносить пока некуда."
+ADMIN_TEAM_NOT_FOUND = "Команды {team_id} нет. Список: /teams"
+ADMIN_TEAM_FULL = "В команде {team_id} уже 3 участницы. Сначала перенеси кого-то оттуда или используй <code>new</code>."
+ADMIN_MOVED = "Готово: {name} → {team} (было: {old})."
+ADMIN_TEAMS_EMPTY = "Команд пока нет."
+ADMIN_TEAMS_ROW = "<b>{team}</b> (id {id}, {count}/3):\n{members}"
+ADMIN_TEAMS_MEMBER = "   • {name} — <code>{tg_id}</code>"
+ADMIN_TEAMS_UNASSIGNED = "<b>Готовы, но без команды:</b>\n{members}"
 
 
 def spheres_word(n: int) -> str:

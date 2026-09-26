@@ -6,7 +6,7 @@ from bot.models import OnboardingStep
 from bot.services import onboarding as svc
 from bot.services import wheel
 from bot.services.users import get_or_create_user
-from tests.helpers import TG_USER, all_texts, make_callback, make_message, make_state
+from tests.helpers import TG_USER, all_texts, make_bot, make_callback, make_message, make_state
 
 
 class Bot:
@@ -16,17 +16,20 @@ class Bot:
         self.sm = sessionmaker
         self.state = make_state()
         self.msg = make_message()
+        self.bot = make_bot()
 
     async def text(self, text):
         self.msg = make_message(text)
         async with self.sm() as session:
-            await on_text(self.msg, session, self.state)
+            await on_text(self.msg, session, self.state, self.bot)
             await session.commit()
         return self.msg
 
     async def press(self, handler, data, **kw):
         cb = make_callback(data, self.msg)
         async with self.sm() as session:
+            if handler is on_tactic_callback:
+                kw.setdefault("bot", self.bot)
             await handler(cb, session, **kw)
             await session.commit()
         return cb
@@ -108,7 +111,8 @@ async def test_full_onboarding(sessionmaker):
 
     user = await bot.user()
     assert user.onboarding_step == OnboardingStep.DONE and user.is_ready and user.cycle_start.weekday() == 0
-    final = bot.msg.answer.call_args.args[0]
+    final = bot.msg.answer.call_args_list[-2].args[0]
+    assert "Команда №1" in bot.msg.answer.call_args.args[0]  # сразу распределена в команду
     assert "Ты готова" in final and "3 тренировки по 30 минут" in final and "Читать 20 страниц" in final
 
     plan_msg = make_message()

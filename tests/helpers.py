@@ -24,3 +24,7 @@ def make_state():
 
 def all_texts(mock: AsyncMock) -> str:
     return "\n".join(call.args[0] for call in mock.call_args_list)
+
+
+def make_bot():
+    return SimpleNamespace(send_message=AsyncMock())

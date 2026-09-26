@@ -6,30 +6,24 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime
 from html import escape
-from zoneinfo import ZoneInfo
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import keyboards, texts
-from bot.config import Settings
+from bot.config import Settings, local_today
 from bot.models import OnboardingStep, Priority, User
 from bot.services import onboarding as svc
+from bot.handlers.teams import join_team
 from bot.services.users import get_or_create_user
 
 router = Router(name="onboarding")
 
 EXPLORE_DISPLAY_LEN = 100
-
-
-def _today(settings: Settings | None) -> date:
-    tz = ZoneInfo(settings.timezone) if settings else None
-    return datetime.now(tz).date()
 
 
 # ---------- рендер ----------
@@ -107,7 +101,7 @@ async def send_step_prompt(message: Message, session: AsyncSession, user: User) 
 
 @router.message(F.chat.type == "private", F.text, ~F.text.startswith("/"))
 async def on_text(
-    message: Message, session: AsyncSession, state: FSMContext, settings: Settings | None = None
+    message: Message, session: AsyncSession, state: FSMContext, bot: Bot, settings: Settings | None = None
 ) -> None:
     user = await get_or_create_user(session, message.from_user)
     text = message.text.strip()
@@ -118,7 +112,7 @@ async def on_text(
     elif step == OnboardingStep.INTENT:
         await _on_intent_text(message, session, user, text)
     elif step == OnboardingStep.TACTICS:
-        await _on_tactic_text(message, session, user, text, state, settings)
+        await _on_tactic_text(message, session, user, text, state, bot, settings)
     elif step == OnboardingStep.WHEEL:
         from bot.handlers.wheel import wheel_question  # локальный импорт: wheel импортирует этот модуль
         from bot.services import wheel
@@ -159,7 +153,13 @@ async def _on_intent_text(message: Message, session: AsyncSession, user: User, t
 
 
 async def _on_tactic_text(
-    message: Message, session: AsyncSession, user: User, text: str, state: FSMContext, settings: Settings | None
+    message: Message,
+    session: AsyncSession,
+    user: User,
+    text: str,
+    state: FSMContext,
+    bot: Bot,
+    settings: Settings | None,
 ) -> None:
     priority = await svc.current_tactic_priority(session, user)
     if priority is None:
@@ -172,21 +172,29 @@ async def _on_tactic_text(
         )
         return
     await state.update_data(pending_tactic=None, pending_position=None)
-    await _save_tactic(message, session, user, priority, text, settings)
+    await _save_tactic(message, session, user, priority, text, bot, settings)
 
 
 async def _save_tactic(
-    message: Message, session: AsyncSession, user: User, priority: Priority, text: str, settings: Settings | None
+    message: Message,
+    session: AsyncSession,
+    user: User,
+    priority: Priority,
+    text: str,
+    bot: Bot,
+    settings: Settings | None,
 ) -> None:
     await svc.add_tactic(session, user, priority, text)
     if len(priority.tactics) >= svc.MAX_TACTICS_PER_PRIORITY:
-        await _advance(message, session, user, settings)
+        await _advance(message, session, user, bot, settings)
     else:
         await message.answer(texts.TACTIC_ADDED_ONE, reply_markup=keyboards.tactic_next(priority.position))
 
 
-async def _advance(message: Message, session: AsyncSession, user: User, settings: Settings | None) -> None:
-    finished = svc.advance_tactics(user, _today(settings))
+async def _advance(
+    message: Message, session: AsyncSession, user: User, bot: Bot, settings: Settings | None
+) -> None:
+    finished = svc.advance_tactics(user, local_today(settings))
     if not finished:
         priority = await svc.current_tactic_priority(session, user)
         await message.answer(tactic_question(priority))
@@ -195,6 +203,7 @@ async def _advance(message: Message, session: AsyncSession, user: User, settings
     await message.answer(
         texts.ONBOARDING_DONE.format(plan=plan_text(priorities), start=user.cycle_start.strftime("%d.%m"))
     )
+    await join_team(message, bot, session, user, settings)
 
 
 # ---------- кнопки ----------
@@ -273,7 +282,7 @@ async def on_eliminate_callback(callback: CallbackQuery, session: AsyncSession) 
 
 @router.callback_query(F.data.startswith("tac:"))
 async def on_tactic_callback(
-    callback: CallbackQuery, session: AsyncSession, state: FSMContext, settings: Settings | None = None
+    callback: CallbackQuery, session: AsyncSession, state: FSMContext, bot: Bot, settings: Settings | None = None
 ) -> None:
     user = await get_or_create_user(session, callback.from_user)
     priority = await svc.current_tactic_priority(session, user)
@@ -288,7 +297,7 @@ async def on_tactic_callback(
             await callback.answer()
             return
         await callback.message.edit_reply_markup(reply_markup=None)
-        await _advance(callback.message, session, user, settings)
+        await _advance(callback.message, session, user, bot, settings)
     elif action == "keep":
         data = await state.get_data()
         text = data.get("pending_tactic")
@@ -297,7 +306,7 @@ async def on_tactic_callback(
             return
         await state.update_data(pending_tactic=None, pending_position=None)
         await callback.message.edit_reply_markup(reply_markup=None)
-        await _save_tactic(callback.message, session, user, priority, text, settings)
+        await _save_tactic(callback.message, session, user, priority, text, bot, settings)
     await callback.answer()
 
 

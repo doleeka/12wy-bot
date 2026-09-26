@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -36,3 +38,9 @@ def load_settings() -> Settings:
         admin_ids=_parse_admin_ids(os.getenv("ADMIN_IDS", "")),
         timezone=os.getenv("TIMEZONE", "Europe/Moscow"),
     )
+
+
+def local_today(settings: Settings | None) -> date:
+    """Сегодняшняя дата в часовом поясе бота."""
+    tz = ZoneInfo(settings.timezone) if settings else None
+    return datetime.now(tz).date()
