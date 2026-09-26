@@ -1,5 +1,5 @@
 """Mini App: тактики с расписанием по неделям, план, подтверждение → готова и в команде."""
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -122,7 +122,67 @@ async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker):  # 
         assert user.is_ready and user.onboarding_step == OnboardingStep.DONE
         assert user.cycle_start == svc.cycle_start_for(date.today())
 
-    # после подтверждения план только для чтения (правки в середине цикла — отдельный шаг)
-    assert (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})).status_code == 409
+    # до старта цикла план можно менять; повторно подтверждать не нужно
     assert (await api.post("/api/plan/confirm", headers=h)).status_code == 409
-    assert (await api.get("/api/plan", headers=h)).json()["team"] == "Команда №1"
+    plan = (await api.get("/api/plan", headers=h)).json()
+    assert plan["team"] == "Команда №1" and plan["editable"]
+    plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})).json()
+    assert len(plan["priorities"][0]["tactics"]) == 2
+
+    # после старта — только чтение
+    async with sessionmaker() as session:
+        user = await teams.get_user_by_telegram_id(session, 42)
+        user.cycle_start = date.today() - timedelta(days=date.today().weekday())
+        await session.commit()
+    assert (await api.get("/api/plan", headers=h)).json()["editable"] is False
+    r = await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})
+    assert r.status_code == 409 and r.json()["detail"] == "plan_locked"
+    assert (await api.put(f"/api/priorities/{pids[0]}", headers=h, json={"title": "X", "intent": WHY})).status_code == 409
+    assert (await api.post("/api/plan/reselect", headers=h)).status_code == 409
+
+
+async def confirmed(api, sessionmaker):  # noqa: F811
+    pids = await to_tactics(api)
+    h = auth()
+    for pid in pids:
+        await api.post("/api/tactics", headers=h, json={"priority_id": pid, "text": "2 часа", "days": [0]})
+    await api.post("/api/plan/confirm", headers=h)
+    return pids
+
+
+async def test_edit_goal_before_start(api, sessionmaker):  # noqa: F811
+    pids = await confirmed(api, sessionmaker)
+    h = auth()
+    plan = (await api.put(f"/api/priorities/{pids[1]}", headers=h, json={"title": "Разговорный английский", "intent": WHY + "!"})).json()
+    p = plan["priorities"][1]
+    assert p["title"] == "Разговорный английский" and p["intent"] == WHY + "!" and len(p["tactics"]) == 1
+    bad = await api.put(f"/api/priorities/{pids[1]}", headers=h, json={"title": "  ", "intent": WHY})
+    assert bad.json()["detail"] == "bad_title"
+    bad = await api.put(f"/api/priorities/{pids[1]}", headers=h, json={"title": "ok", "intent": "надо"})
+    assert bad.json()["detail"] == "intent_required"
+    # последнюю тактику цели удалить нельзя
+    tid = p["tactics"][0]["id"]
+    assert (await api.delete(f"/api/tactics/{tid}", headers=h)).json()["detail"] == "last_tactic"
+
+
+async def test_reselect_priorities_before_start(api, sessionmaker):  # noqa: F811
+    await confirmed(api, sessionmaker)
+    h = auth()
+    data = (await api.post("/api/plan/reselect", headers=h)).json()
+    ids = [i["id"] for i in data["items"]]
+    await api.post("/api/explore", headers=h, json={"text": "Новая цель"})  # список можно дописать
+    data = (await api.get("/api/explore", headers=h)).json()
+    new_ids = [i["id"] for i in data["items"] if i["text"] in ("Спорт", "Английский", "Новая цель")]
+    r = await api.put("/api/eliminate", headers=h, json={"selected": new_ids})
+    pids = [p["id"] for p in r.json()["priorities"]]
+    assert [p["title"] for p in r.json()["priorities"]] == ["Спорт", "Английский", "Новая цель"]
+    await api.put("/api/intent", headers=h, json={"intents": {str(p): WHY for p in pids}})
+    plan = (await api.get("/api/plan", headers=h)).json()
+    assert plan["step"] == "tactics" and all(not p["tactics"] for p in plan["priorities"])  # тактики — заново
+    for pid in pids:
+        await api.post("/api/tactics", headers=h, json={"priority_id": pid, "text": "1 раз", "days": [2]})
+    plan = (await api.post("/api/plan/confirm", headers=h)).json()
+    assert plan["step"] == "done" and plan["team"] == "Команда №1"  # команда та же
+    assert "остаётся прежней" in api.tg.sent(42)[-1]
+    async with sessionmaker() as session:
+        assert (await teams.get_user_by_telegram_id(session, 42)).cycle_start == svc.cycle_start_for(date.today())

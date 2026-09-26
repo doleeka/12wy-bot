@@ -158,16 +158,34 @@
       <button class="link danger" id="delete-tactic" hidden>Удалить тактику</button>
     </section>
 
+    <!-- Цель и «зачем» -->
+    <section class="screen" id="screen-priority-edit" hidden>
+      <p class="eyebrow" id="prio-eyebrow"></p>
+      <h1>Цель и «зачем»</h1>
+      <label class="field-label" for="prio-title">Цель</label>
+      <textarea id="prio-title" class="field" rows="2" maxlength="200"></textarea>
+      <label class="field-label" for="prio-intent">Зачем это тебе?</label>
+      <textarea id="prio-intent" class="field" rows="4" maxlength="2000"></textarea>
+      <p class="hint-line" id="prio-hint"></p>
+    </section>
+
     <!-- Итог плана -->
     <section class="screen" id="screen-plan" hidden>
       <p class="eyebrow" id="plan-eyebrow">Итог</p>
       <h1 id="plan-title">Твой план на 12 недель</h1>
       <p class="muted" id="plan-start"></p>
+      <div class="card accent" id="plan-edit-box" hidden>
+        <b>До старта план можно менять</b>
+        <p class="muted">Поговорила с командой, передумала — поправь цели, «зачем» и тактики. С первого дня цикла план закроется.</p>
+        <button class="link" id="plan-edit">✏️ Изменить цели и тактики</button><br>
+        <button class="link" id="plan-reselect">↺ Выбрать 3 приоритета заново</button>
+      </div>
       <div id="plan-priorities"></div>
       <h2>По неделям</h2>
       <div class="plan-grid" id="plan-grid"></div>
       <p class="muted small" id="plan-buffer"></p>
       <button class="link" id="edit-plan" hidden>← Изменить тактики</button>
+
     </section>
 
     <!-- Готова -->

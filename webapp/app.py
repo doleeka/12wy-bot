@@ -17,7 +17,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
-from bot.models import OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
+from bot.models import EssentialIntent, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
@@ -53,6 +53,11 @@ class IntentIn(BaseModel):
 class CheckinIn(BaseModel):
     week_start: str
     marks: dict[int, bool]
+
+
+class PriorityIn(BaseModel):
+    title: str
+    intent: str
 
 
 class TacticIn(BaseModel):
@@ -168,6 +173,18 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         if user.onboarding_step not in steps:
             raise HTTPException(status_code=409, detail="wrong_step")
 
+    def before_start(user: User) -> bool:
+        """Подтвердила план, но цикл ещё не начался — план можно менять."""
+        return (
+            user.onboarding_step == OnboardingStep.DONE
+            and user.cycle_start is not None
+            and local_today(settings) < user.cycle_start
+        )
+
+    def require_plan_editable(user: User, *steps: OnboardingStep) -> None:
+        if user.onboarding_step not in steps and not before_start(user):
+            raise HTTPException(status_code=409, detail="plan_locked")
+
     @app.get("/api/explore")
     async def get_explore(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         return await explore_payload(session, user)
@@ -234,7 +251,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def save_intent(
         body: IntentIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
-        require_step(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
+        require_plan_editable(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
         try:
             await svc.set_intents(session, user, body.intents)
         except ValueError:
@@ -281,6 +298,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "weeks_total": len(tactics.ALL_WEEKS),
             "cycle_start": start.isoformat(),
             "team": teams.team_name(team) if team else None,
+            # план можно менять: во время онбординга и после подтверждения — пока цикл не начался
+            "editable": user.onboarding_step == OnboardingStep.TACTICS or before_start(user),
         }
 
     async def own_priority(session: AsyncSession, user: User, priority_id: int) -> Priority:
@@ -315,6 +334,34 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             raise HTTPException(status_code=422, detail="pick_days")
         return text, None, days
 
+    @app.put("/api/priorities/{priority_id}")
+    async def edit_priority(
+        priority_id: int, body: PriorityIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        """Переименовать цель и поправить её «зачем»."""
+        require_plan_editable(user, OnboardingStep.TACTICS)
+        priority = await own_priority(session, user, priority_id)
+        title, intent = body.title.strip(), body.intent.strip()
+        if not title or len(title) > svc.MAX_ITEM_LEN:
+            raise HTTPException(status_code=422, detail="bad_title")
+        if len(intent) < svc.MIN_INTENT_LEN:
+            raise HTTPException(status_code=422, detail="intent_required")
+        priority.title = title
+        existing = await session.scalar(select(EssentialIntent).where(EssentialIntent.priority_id == priority.id))
+        if existing is None:
+            session.add(EssentialIntent(priority_id=priority.id, text=intent))
+        else:
+            existing.text = intent
+        await session.flush()
+        return await plan_payload(session, user)
+
+    @app.post("/api/plan/reselect")
+    async def reselect_priorities(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        """Выбрать 3 приоритета заново из списка Explore. Тактики старых приоритетов удалятся при выборе."""
+        require_plan_editable(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
+        user.onboarding_step = OnboardingStep.ELIMINATE
+        return await explore_payload(session, user)
+
     @app.get("/api/plan")
     async def get_plan(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         return await plan_payload(session, user)
@@ -323,7 +370,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def add_tactic(
         body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
-        require_step(user, OnboardingStep.TACTICS)
+        require_plan_editable(user, OnboardingStep.TACTICS)
         priority = await own_priority(session, user, body.priority_id or 0)
         text, weeks, days = clean_tactic(body)
         count = await session.scalar(
@@ -339,7 +386,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def edit_tactic(
         tactic_id: int, body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
-        require_step(user, OnboardingStep.TACTICS)
+        require_plan_editable(user, OnboardingStep.TACTICS)
         tactic = await own_tactic(session, user, tactic_id)
         tactic.text, tactic.weeks, tactic.days = clean_tactic(body)
         await session.flush()
@@ -349,8 +396,18 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def delete_tactic(
         tactic_id: int, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
-        require_step(user, OnboardingStep.TACTICS)
-        await session.delete(await own_tactic(session, user, tactic_id))
+        require_plan_editable(user, OnboardingStep.TACTICS)
+        tactic = await own_tactic(session, user, tactic_id)
+        if user.onboarding_step == OnboardingStep.DONE:
+            # в подтверждённом плане у каждой цели остаётся хотя бы одна тактика
+            left = await session.scalar(
+                select(func.count(WeeklyTactic.id)).where(
+                    WeeklyTactic.priority_id == tactic.priority_id, WeeklyTactic.is_active
+                )
+            )
+            if left <= 1:
+                raise HTTPException(status_code=422, detail="last_tactic")
+        await session.delete(tactic)
         await session.flush()
         return await plan_payload(session, user)
 

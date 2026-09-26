@@ -6,7 +6,7 @@
   const $ = (sel) => document.querySelector(sel);
   const state = {
     me: null, wheel: null, scores: {}, touched: new Set(), extras: [],
-    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null, checkin: null, marks: {},
+    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null, checkin: null, marks: {}, editPriority: null,
   };
   let mainHandler = null;
   let backHandler = null;
@@ -584,6 +584,10 @@
       const dot = el2("span", "dot-p");
       dot.style.background = "var(--p" + p.position + ")";
       head.append(dot, el2("b", null, p.position + ". " + p.title));
+      const pen = el2("button", "edit-prio", "✏️");
+      pen.setAttribute("aria-label", "Изменить цель и «зачем»");
+      pen.addEventListener("click", () => openPriorityEditor(p));
+      head.appendChild(pen);
       group.append(head, el2("p", "why", "Зачем: " + p.intent));
       p.tactics.forEach((t) => {
         const btn = el2("button", "tactic");
@@ -607,14 +611,58 @@
     renderGrid($("#tactics-grid"), plan);
     $("#buffer-hint").textContent = bufferText(plan);
     const missing = plan.priorities.find((p) => !p.tactics.length);
-    mainButton(missing ? "Добавь тактику в «" + missing.title.slice(0, 24) + "»" : "Проверить план", () => showPlan("review"), !missing);
+    const doneLabel = planConfirmed() ? "Готово" : "Проверить план";
+    const next = planConfirmed() ? () => showPlan("view") : () => showPlan("review");
+    mainButton(missing ? "Добавь тактику в «" + missing.title.slice(0, 24) + "»" : doneLabel, next, !missing);
+  }
+
+  const planConfirmed = () => state.plan && state.plan.step === "done";
+
+  function toTactics() {
+    show("screen-tactics");
+    // в онбординге назад — к «зачем»; в подтверждённом плане (правка до старта) — к плану
+    backButton(planConfirmed() ? () => showPlan("view") : showIntent);
+    renderTactics();
   }
 
   async function showTactics() {
     try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
-    show("screen-tactics");
-    backButton(showIntent); // «зачем» можно поправить, пока план не подтверждён
-    renderTactics();
+    toTactics();
+  }
+
+  // ---------- цель и «зачем» ----------
+
+  function priorityValid() {
+    return $("#prio-title").value.trim().length > 0 && $("#prio-intent").value.trim().length >= 15;
+  }
+
+  function refreshPriorityEditor() {
+    const left = 15 - $("#prio-intent").value.trim().length;
+    $("#prio-hint").textContent = left > 0 ? "«Зачем» — ещё " + left + " симв., чуть подробнее, чем «надо»" : "";
+    mainButton("Сохранить", savePriority, priorityValid());
+  }
+
+  function openPriorityEditor(p) {
+    state.editPriority = p;
+    show("screen-priority-edit");
+    $("#prio-eyebrow").textContent = "Приоритет " + p.position;
+    $("#prio-title").value = p.title;
+    $("#prio-intent").value = p.intent;
+    backButton(toTactics);
+    refreshPriorityEditor();
+  }
+
+  async function savePriority() {
+    if (!priorityValid()) return;
+    tg.MainButton.showProgress();
+    try {
+      state.plan = await api("PUT", "/api/priorities/" + state.editPriority.id, {
+        title: $("#prio-title").value.trim(),
+        intent: $("#prio-intent").value.trim(),
+      });
+      haptic.ok();
+      toTactics();
+    } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
   // ---------- редактор тактики ----------
@@ -714,9 +762,7 @@
         ? await api("PUT", "/api/tactics/" + e.tacticId, body)
         : await api("POST", "/api/tactics", Object.assign({ priority_id: e.priorityId }, body));
       haptic.ok();
-      show("screen-tactics");
-      backButton(showIntent);
-      renderTactics();
+      toTactics();
     } catch (err) { failed(err); } finally { tg.MainButton.hideProgress(); }
   }
 
@@ -725,9 +771,7 @@
       if (!ok) return;
       try {
         state.plan = await api("DELETE", "/api/tactics/" + state.edit.tacticId);
-        show("screen-tactics");
-        backButton(showIntent);
-        renderTactics();
+        toTactics();
       } catch (err) { failed(err); }
     });
   }
@@ -762,6 +806,7 @@
     renderGrid($("#plan-grid"), plan);
     $("#plan-buffer").textContent = bufferText(plan);
     $("#edit-plan").hidden = !review;
+    $("#plan-edit-box").hidden = review || !plan.editable;
     if (review) {
       backButton(showTactics);
       mainButton("Подтвердить план", confirmPlan);
@@ -863,7 +908,7 @@
     if (ci.status === "not_started") {
       const days = daysUntil(ci.cycle_start);
       $("#home-title").textContent = "Старт — " + formatDate(ci.cycle_start);
-      $("#home-sub").textContent = days > 0 ? "До начала 12 недель: " + days + " дн. Первый чек-ин — в конце первой недели." : "";
+      $("#home-sub").textContent = days > 0 ? "До начала 12 недель: " + days + " дн. До старта план ещё можно поменять." : "";
       $("#home-week-label").textContent = "Неделя 1";
       $("#home-week").textContent = "—";
       $("#home-week-note").textContent = "ещё не началась";
@@ -972,6 +1017,9 @@
       wrong_step: "Этот шаг уже пройден — открой приложение заново.",
       mark_all: "Отметь все тактики этой недели.",
       week_closed: "Эта неделя уже закрыта для отметок.",
+      plan_locked: "Цикл уже начался — план закрыт для изменений.",
+      last_tactic: "У каждой цели должна остаться хотя бы одна тактика.",
+      bad_title: "Напиши цель.",
       not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
       pick_exactly_3: "Нужно выбрать ровно 3.",
       intent_required: "Нужно «зачем» для каждого приоритета — хотя бы пару предложений.",
@@ -1021,6 +1069,18 @@
     $("#delete-tactic").addEventListener("click", deleteTactic);
     $("#edit-plan").addEventListener("click", showTactics);
     $("#open-plan").addEventListener("click", openPlanView);
+    $("#plan-edit").addEventListener("click", showTactics);
+    $("#plan-reselect").addEventListener("click", () => {
+      tg.showConfirm("Выбрать 3 приоритета заново? Тактики нынешних приоритетов удалятся, команда останется.", async (ok) => {
+        if (!ok) return;
+        try {
+          state.explore = await api("POST", "/api/plan/reselect");
+          state.me.step = "eliminate";
+          showEliminate();
+        } catch (e) { failed(e); }
+      });
+    });
+    ["#prio-title", "#prio-intent"].forEach((sel) => $(sel).addEventListener("input", refreshPriorityEditor));
     try {
       state.me = await api("GET", "/api/me");
       document.querySelectorAll("[data-name]").forEach((n) => (n.textContent = state.me.first_name || ""));

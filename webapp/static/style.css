@@ -262,3 +262,7 @@ details.card ul { margin: 8px 0 4px; padding-left: 18px; color: var(--hint); }
 }
 .day-grid button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 #weeks-summary { margin-top: 8px; }
+
+.edit-prio { border: 0; background: none; font-size: 16px; cursor: pointer; padding: 0 4px; margin-left: auto; }
+#plan-edit-box[hidden] { display: none; }
+#plan-edit-box .link { padding: 6px 0; }
