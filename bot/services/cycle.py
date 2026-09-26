@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Checkin, OnboardingStep, Priority, User, WeeklyTactic
@@ -113,3 +113,23 @@ async def wheel_comparison(session: AsyncSession, user: User) -> list[tuple[whee
     now = await wheel.get_scores(session, user)
     before = await wheel.get_scores(session, user, cycle=user.cycle - 1)
     return [(s, before[s.key], v) for s, v in wheel.ordered_scores(now) if s.key in before]
+
+
+def start_test_cycle(user: User, today: date, week: int = 1) -> date:
+    """Режим проверки для админа: сдвигает старт так, чтобы сегодня шла неделя week (1–12)."""
+    if not 1 <= week <= scorecard.CYCLE_WEEKS:
+        raise ValueError("Неделя — от 1 до 12")
+    user.cycle_start = scorecard.week_start(today) - timedelta(days=7 * (week - 1))
+    user.last_reported_week = None
+    return user.cycle_start
+
+
+async def end_test_cycle(session: AsyncSession, user: User, real_start: date) -> int:
+    """Выход из режима проверки: настоящий старт и удаление отметок до него. Возвращает число удалённых."""
+    result = await session.execute(
+        delete(Checkin).where(Checkin.user_id == user.id, Checkin.week_start < real_start)
+    )
+    user.cycle_start = real_start
+    user.last_reported_week = None
+    await session.flush()
+    return result.rowcount
