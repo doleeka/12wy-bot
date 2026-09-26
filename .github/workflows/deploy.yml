@@ -1,0 +1,39 @@
+# Автодеплой: тесты → если зелёные, выкатываем на Fly.io.
+# Нужен секрет репозитория FLY_API_TOKEN (Settings → Secrets and variables → Actions),
+# получить: fly tokens create deploy --app twelve-weeks-astana
+name: Test and deploy
+
+on:
+  push:
+    branches:
+      - main
+      - claude/telegram-bot-12-week-year-7ssgo7
+  workflow_dispatch: # кнопка «Run workflow» во вкладке Actions — выкатить вручную
+
+# Один деплой за раз: новый пуш ждёт, пока закончится предыдущий
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # --ha=false: ровно одна машина (две одновременно опрашивали бы Telegram и имели бы разные базы)
+      - run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
