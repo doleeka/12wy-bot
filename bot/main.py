@@ -12,7 +12,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, checkin, cycle, group, onboarding, start, teams, wheel
+from bot.commands import set_bot_commands
+from bot.handlers import admin, checkin, cycle, fallback, group, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
@@ -23,8 +24,17 @@ def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
     # group — только групповые чаты; остальные роутеры — только личка (фильтр задан в каждом модуле)
     dp.include_routers(
-        group.router, start.router, admin.router, teams.router, checkin.router, cycle.router, wheel.router, onboarding.router
+        group.router,
+        start.router,
+        admin.router,
+        teams.router,
+        checkin.router,
+        cycle.router,
+        wheel.router,
+        onboarding.router,
+        fallback.router,  # последним: /help и неизвестные команды
     )
+    dp.errors.register(fallback.on_error)
     return dp
 
 
@@ -44,6 +54,11 @@ async def main() -> None:
     sessionmaker = create_sessionmaker(engine)
     dp = build_dispatcher(sessionmaker)
     dp["settings"] = settings
+
+    try:
+        await set_bot_commands(bot, settings)
+    except Exception:  # noqa: BLE001 — без меню бот всё равно работает
+        logging.exception("Не удалось установить меню команд")
 
     scheduler = setup_scheduler(bot, sessionmaker, settings)
     scheduler.start()

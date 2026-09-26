@@ -19,6 +19,7 @@ python -m bot.main
 | Команда | Кто | Что делает |
 |---|---|---|
 | `/start` | все | онбординг / продолжить с текущего шага |
+| `/help` | все | список команд (админу — и админские) |
 | `/checkin` | участница | чек-ин недели: ✅/❌ по тактикам → % и оценка |
 | `/plan` | участница | мои приоритеты, «зачем» и тактики |
 | `/newcycle` | участница | начать новый цикл после 12 недель (или после паузы) |
@@ -31,7 +32,10 @@ python -m bot.main
 | `/team` в группе | все | проценты команды за неделю |
 | `/backup` | админ | прислать бэкап базы прямо сейчас |
 
-Админы задаются в `ADMIN_IDS`.
+Админы задаются в `ADMIN_IDS`. Меню команд (подсказки при вводе «/») бот ставит сам при старте: участницам — их команды,
+админам — ещё и админские (админ должен хотя бы раз написать боту, иначе Telegram не даст поставить ему меню —
+тогда достаточно перезапустить бота). На неизвестную команду бот отвечает подсказкой, а при ошибке пишет участнице
+«что-то пошло не так», а админам — суть ошибки.
 
 Часовой пояс — `TIMEZONE`, по умолчанию `Asia/Almaty` (Астана, UTC+5 — с 1 марта 2024 весь Казахстан
 живёт по этому времени). Отдельной зоны `Asia/Astana` не существует; бот принимает её как синоним `Asia/Almaty`.
@@ -153,13 +157,13 @@ alembic revision --autogenerate -m "add timezone to users"
 fly auth login
 
 # 2. Создать приложение. Имя уникально во всём Fly — если занято, поменяйте его и в fly.toml (app = "...")
-fly apps create 12wy-bot
+fly apps create twelve-weeks-astana
 
 # 3. Создать volume в том же регионе, что primary_region в fly.toml
-fly volumes create bot_data --size 1 --region fra --app 12wy-bot
+fly volumes create bot_data --size 1 --region fra --app twelve-weeks-astana
 
 # 4. Секреты — токен и админы (в репозиторий не попадают)
-fly secrets set BOT_TOKEN=123456:ABC... ADMIN_IDS=123456789 --app 12wy-bot
+fly secrets set BOT_TOKEN=123456:ABC... ADMIN_IDS=123456789 --app twelve-weeks-astana
 
 # 5. Деплой. Ровно ОДНА машина: две одновременно опрашивали бы Telegram (ошибка Conflict)
 #    и у каждой была бы своя отдельная база
@@ -188,10 +192,10 @@ fly ssh console          # зайти внутрь; база лежит в /data
 
 ```bash
 # 1. Скачать нужный файл из Telegram, затем загрузить его на volume под именем restore.db
-fly ssh sftp shell --app 12wy-bot
+fly ssh sftp shell --app twelve-weeks-astana
 » put 12wy-bot_2026-09-27_0300.db /data/restore.db
 # 2. Перезапустить бота
-fly apps restart 12wy-bot
+fly apps restart twelve-weeks-astana
 ```
 
 При старте бот увидит `/data/restore.db`, проверит его и подменит им базу. Прежняя база

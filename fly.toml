@@ -1,6 +1,6 @@
 # Fly.io: https://fly.io/docs/reference/configuration/
-# Имя приложения должно быть уникальным во всём Fly — поменяйте, если занято.
-app = "12wy-bot"
+# Имя приложения на Fly (уникально во всём Fly). Для другой копии бота — поменять здесь.
+app = "twelve-weeks-astana"
 primary_region = "fra"
 
 # Бот работает через long polling: HTTP-сервисов и открытых портов нет,
