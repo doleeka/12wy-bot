@@ -200,7 +200,8 @@ async def test_scheduled_jobs(sessionmaker):
 def test_scheduler_jobs_configured():
     scheduler = setup_scheduler(make_bot(), None, settings())
     jobs = {job.id: job for job in scheduler.get_jobs()}
-    assert set(jobs) == {"weekly_checkin", "week_planning"}
+    assert set(jobs) == {"weekly_checkin", "week_planning", "nightly_backup"}
+    assert "hour='3'" in str(jobs["nightly_backup"].trigger)
     assert "day_of_week='sun'" in str(jobs["weekly_checkin"].trigger)
     assert "hour='18'" in str(jobs["weekly_checkin"].trigger)
 

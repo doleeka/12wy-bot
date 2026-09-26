@@ -11,15 +11,16 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker, init_db
-from bot.handlers import checkin, onboarding, start, teams, wheel
+from bot.handlers import admin, checkin, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.scheduler import setup_scheduler
+from bot.services.backup import apply_pending_restore
 
 
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
-    dp.include_routers(start.router, teams.router, checkin.router, wheel.router, onboarding.router)
+    dp.include_routers(start.router, admin.router, teams.router, checkin.router, wheel.router, onboarding.router)
     return dp
 
 
@@ -28,6 +29,10 @@ async def main() -> None:
     settings = load_settings()
 
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        apply_pending_restore(settings.database_path)
+    except Exception:  # noqa: BLE001 — битый restore.db не должен ронять бота в цикл перезапусков
+        logging.exception("restore.db не подошёл — работаю с текущей базой")
     engine = create_engine(settings.database_url)
     await init_db(engine)
 

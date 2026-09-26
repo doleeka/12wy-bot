@@ -1,0 +1,29 @@
+# Fly.io: https://fly.io/docs/reference/configuration/
+# Имя приложения должно быть уникальным во всём Fly — поменяйте, если занято.
+app = "12wy-bot"
+primary_region = "fra"
+
+# Бот работает через long polling: HTTP-сервисов и открытых портов нет,
+# поэтому секций [http_service]/[[services]] нет — машина просто работает постоянно.
+
+kill_signal = "SIGINT"
+kill_timeout = "10s"
+
+[build]
+
+[env]
+  DATABASE_PATH = "/data/bot.db"
+  TIMEZONE = "Europe/Moscow"
+  CHECKIN_DAY = "sun"
+  CHECKIN_TIME = "18:00"
+  PLANNING_TIME = "09:00"
+  BACKUP_TIME = "03:00"
+  # BOT_TOKEN и ADMIN_IDS — не здесь, а через `fly secrets set` (см. README)
+
+[[mounts]]
+  source = "bot_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

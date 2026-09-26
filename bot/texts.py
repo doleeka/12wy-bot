@@ -240,5 +240,15 @@ ADMIN_REPORT_SET = "Готово: {name}, отчёт — <b>{target}</b>"
 REPORT_TARGET_TITLES = {"team": "в команду", "admin": "админу", "none": "никому"}
 
 
+# ---------- Бэкап ----------
+
+BACKUP_CAPTION = (
+    "🗄 Бэкап базы · {when}\n"
+    "Участниц: {users}, команд: {teams}, отметок чек-ина: {checkins} · {size}"
+)
+BACKUP_FAILED = "⚠️ Бэкап не удался: {error}"
+BACKUP_STARTED = "Делаю бэкап…"
+
+
 def spheres_word(n: int) -> str:
     return "сферу" if n == 1 else "сферы"

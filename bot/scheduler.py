@@ -1,4 +1,4 @@
-"""Расписание: воскресный чек-ин и понедельничное напоминание о новой неделе."""
+"""Расписание: воскресный чек-ин, понедельничное напоминание о новой неделе, ночной бэкап."""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot import texts
+from bot.backup_job import send_backup
 from bot.config import Settings, local_today
 from bot.handlers.checkin import build_checkin
 from bot.models import OnboardingStep, User
@@ -76,6 +77,14 @@ def setup_scheduler(bot: Bot, sessionmaker: async_sessionmaker, settings: Settin
         CronTrigger(day_of_week="mon", hour=hour, minute=minute, timezone=settings.timezone),
         args=[bot, sessionmaker, settings],
         id="week_planning",
+        misfire_grace_time=3600,
+    )
+    hour, minute = _hm(settings.backup_time)
+    scheduler.add_job(
+        send_backup,
+        CronTrigger(hour=hour, minute=minute, timezone=settings.timezone),
+        args=[bot, settings],
+        id="nightly_backup",
         misfire_grace_time=3600,
     )
     return scheduler

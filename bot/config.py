@@ -26,6 +26,8 @@ class Settings:
     checkin_day: str = "sun"
     checkin_time: str = "18:00"
     planning_time: str = "09:00"
+    # Ночной бэкап базы админам
+    backup_time: str = "03:00"
 
     @property
     def database_url(self) -> str:
@@ -44,6 +46,7 @@ def load_settings() -> Settings:
         checkin_day=os.getenv("CHECKIN_DAY", "sun"),
         checkin_time=os.getenv("CHECKIN_TIME", "18:00"),
         planning_time=os.getenv("PLANNING_TIME", "09:00"),
+        backup_time=os.getenv("BACKUP_TIME", "03:00"),
     )
 
 
