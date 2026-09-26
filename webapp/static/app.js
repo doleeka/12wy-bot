@@ -666,6 +666,10 @@
     const weeks = Array.from({ length: plan.weeks_total }, (_, i) => i + 1);
     const table = el2("table");
     table.setAttribute("aria-label", "План по неделям");
+    const cols = el2("colgroup");
+    cols.appendChild(el2("col", "c-name"));
+    weeks.forEach(() => cols.appendChild(el2("col")));
+    table.appendChild(cols);
     const head = table.createTHead().insertRow();
     head.appendChild(el2("th", "name", ""));
     weeks.forEach((w) => head.appendChild(el2("th", null, String(w))));
@@ -674,7 +678,8 @@
       if (!p.tactics.length) return;
       const g = body.insertRow();
       g.className = "group-row";
-      const gh = el2("th", null, p.position + ". " + p.title);
+      const gh = el2("th");
+      gh.appendChild(el2("span", null, p.position + ". " + p.title)); // название цели остаётся видимым при прокрутке
       gh.colSpan = weeks.length + 1;
       g.appendChild(gh);
       p.tactics.forEach((t) => {
@@ -697,6 +702,13 @@
     plan.load.forEach((n) => foot.appendChild(el2("td", n === peak && n > 0 ? "peak" : null, String(n))));
     box.innerHTML = "";
     box.appendChild(table);
+    gridHint();
+  }
+
+  // Подсказка «листай вбок» — только если таблица не помещается (в закрытом «Обзоре» ширины ещё нет)
+  function gridHint() {
+    const box = $("#plan-grid");
+    $("#plan-grid-hint").hidden = !(box.clientWidth && box.scrollWidth > box.clientWidth + 1);
   }
 
   function bufferText(plan) {
@@ -1512,6 +1524,8 @@
     $("#today-open-plan").addEventListener("click", openPlanView);
     $("#today-checkin").addEventListener("click", openCheckin);
     $("#plan-edit").addEventListener("click", showTactics);
+    $("details.overview").addEventListener("toggle", gridHint);
+    window.addEventListener("resize", gridHint);
     $("#plan-reselect").addEventListener("click", () => {
       tg.showConfirm("Выбрать 3 приоритета заново? Действия нынешних приоритетов удалятся, команда останется.", async (ok) => {
         if (!ok) return;

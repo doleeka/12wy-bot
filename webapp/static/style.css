@@ -210,12 +210,22 @@ details.card ul { margin: 8px 0 4px; padding-left: 18px; color: var(--hint); }
 .link.danger { color: var(--critical); margin-top: 16px; }
 
 /* ---------- план по неделям: строки — тактики, колонки — недели ---------- */
-.plan-grid { overflow-x: auto; margin: 4px -4px 4px; padding: 0 4px; }
-.plan-grid table { border-collapse: separate; border-spacing: 2px; width: 100%; table-layout: fixed; font-size: 12px; }
+/* Обзор нагрузки: столбцы не ужимаются ниже читаемого минимума; на узком экране листается сама таблица,
+   названия закреплены слева и переносятся целиком */
+.plan-grid { overflow-x: auto; margin: 4px -4px 4px; padding: 0 4px; -webkit-overflow-scrolling: touch; }
+.plan-grid:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan-grid table { border-collapse: separate; border-spacing: 2px; table-layout: fixed; font-size: 12px; width: 100%; min-width: calc(128px + 12 * 28px); }
 .plan-grid th, .plan-grid td { padding: 0; text-align: center; }
-.plan-grid thead th { color: var(--hint); font-weight: 500; height: 20px; font-variant-numeric: tabular-nums; }
-.plan-grid .name { width: 38%; text-align: left; padding-right: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 400; }
-.plan-grid .group-row th { text-align: left; font-weight: 600; color: var(--text); padding-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-grid col.c-name { width: 128px; }
+.plan-grid thead th { color: var(--hint); font-weight: 500; height: 20px; font-variant-numeric: tabular-nums; min-width: 26px; }
+.plan-grid .name {
+  text-align: left; padding: 3px 8px 3px 0; color: var(--text); font-weight: 400; line-height: 1.25;
+  white-space: normal; overflow-wrap: anywhere; position: sticky; left: 0; z-index: 1; background: var(--bg-2);
+  box-shadow: -8px 0 0 var(--bg-2), 2px 0 0 var(--bg-2); /* закрывает зазоры, куда при прокрутке заезжают ячейки */
+}
+.plan-grid .group-row th { text-align: left; font-weight: 600; color: var(--text); padding-top: 8px; }
+.plan-grid .group-row th span { position: sticky; left: 0; display: inline-block; max-width: min(100%, calc(100vw - 72px)); white-space: normal; }
+.grid-hint { margin: 8px 0 0; }
 .plan-grid td.cell { height: 20px; border-radius: 4px; background: color-mix(in srgb, var(--hint) 10%, transparent); }
 .plan-grid td.cell.on { background: var(--pc); }
 .plan-grid tr.p1 { --pc: var(--p1); } .plan-grid tr.p2 { --pc: var(--p2); } .plan-grid tr.p3 { --pc: var(--p3); }

@@ -192,7 +192,8 @@
       <div class="weeks" id="plan-weeks"></div>
       <details class="card more overview">
         <summary>Обзор нагрузки</summary>
-        <div class="plan-grid" id="plan-grid"></div>
+        <p class="muted small grid-hint" id="plan-grid-hint" hidden>Названия закреплены слева — недели листай вбок →</p>
+        <div class="plan-grid" id="plan-grid" tabindex="0" role="region" aria-label="Обзор нагрузки по неделям, листается вбок"></div>
         <p class="muted small" id="plan-buffer"></p>
       </details>
       <button class="link" id="edit-plan" hidden>← Изменить действия</button>
