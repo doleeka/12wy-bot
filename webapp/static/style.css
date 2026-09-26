@@ -106,8 +106,18 @@ p { margin: 0 0 12px; }
 .sphere.unrated .sphere-value { color: var(--hint); font-weight: 400; }
 .sphere.low .sphere-value::before { content: "⚠ "; color: var(--critical); }
 .sphere-remove { border: 0; background: none; color: var(--hint); font-size: 18px; padding: 0 0 0 4px; cursor: pointer; }
-.sphere input[type=range] { width: 100%; margin: 8px 0 2px; accent-color: var(--accent); height: 28px; }
-.sphere.unrated input[type=range] { opacity: .45; }
+/* ползунок колеса: вся полоса — зона касания; до оценки бегунок контурный (не полупрозрачный) */
+.slider { --pos: .444; position: relative; height: 40px; margin: 4px 0 0; touch-action: pan-y; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.slider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+.slider .track { position: absolute; left: 14px; right: 14px; top: 17px; height: 6px; border-radius: 3px; background: var(--line); }
+.slider .fill { position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--pos) * 100%); border-radius: 3px; background: var(--accent); }
+.slider .thumb {
+  position: absolute; top: 6px; left: calc(var(--pos) * (100% - 28px)); width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); border: 3px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.25); box-sizing: border-box;
+}
+.slider.dragging .thumb { transform: scale(1.12); }
+.sphere.unrated .slider .fill { background: transparent; }
+.sphere.unrated .slider .thumb { background: var(--bg); border: 3px solid var(--accent); }
 .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--hint); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }

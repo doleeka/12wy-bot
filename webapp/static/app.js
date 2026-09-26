@@ -238,12 +238,16 @@
     row.innerHTML =
       '<div class="sphere-head"><span>' + s.emoji + '</span><span class="sphere-title"></span>' +
       '<span class="sphere-value"></span></div>' +
-      '<input type="range" min="1" max="10" step="1">' +
+      '<div class="slider" role="slider" tabindex="0" aria-valuemin="1" aria-valuemax="10">' +
+      '<span class="track"><i class="fill"></i></span><span class="thumb"></span></div>' +
       '<div class="scale"><span>1 · совсем плохо</span><span>10 · лучше не бывает</span></div>';
     row.querySelector(".sphere-title").textContent = s.title;
-    const input = row.querySelector("input");
-    input.setAttribute("aria-label", s.title);
-    input.value = state.scores[s.key] || 5;
+    // Свой ползунок вместо <input type=range>: в WebView Telegram нативный двигается, только если точно
+    // попасть в маленький бегунок. Здесь активна вся полоса: касание сразу ставит оценку (и стартовые 5),
+    // тянуть можно откуда угодно; вертикальная прокрутка страницы остаётся (touch-action: pan-y).
+    const slider = row.querySelector(".slider");
+    slider.setAttribute("aria-label", s.title);
+    let value = state.scores[s.key] || 5;
     if (!s.core) {
       const rm = document.createElement("button");
       rm.className = "sphere-remove";
@@ -262,18 +266,59 @@
       row.classList.toggle("unrated", !rated);
       row.classList.toggle("low", rated && isLow(state.scores[s.key]));
       row.querySelector(".sphere-value").textContent = rated ? state.scores[s.key] + "/10" : "—";
+      slider.style.setProperty("--pos", (value - 1) / 9);
+      slider.setAttribute("aria-valuenow", value);
+      slider.setAttribute("aria-valuetext", rated ? value + " из 10" : "не оценено");
     };
-    const onInput = () => {
-      const v = Number(input.value);
-      if (state.scores[s.key] !== v || !state.touched.has(s.key)) haptic.tick();
+    const setValue = (v) => {
+      v = Math.min(10, Math.max(1, v));
+      if (v === value && state.touched.has(s.key)) return;
+      value = v;
+      haptic.tick();
       state.scores[s.key] = v;
       state.touched.add(s.key);
       update();
       refreshWheel();
     };
-    input.addEventListener("input", onInput);
-    // касание без сдвига тоже считается оценкой (например, согласна на 5)
-    input.addEventListener("change", onInput);
+    const fromX = (x) => {
+      const r = slider.getBoundingClientRect();
+      const thumb = 28; // центр бегунка ходит от 14px до width−14px
+      return Math.round(1 + 9 * Math.min(1, Math.max(0, (x - r.left - thumb / 2) / (r.width - thumb))));
+    };
+    // Пальцем: сдвиг вбок — тянем; просто касание — оценка в точке касания (и стартовые 5);
+    // пошла вертикальная прокрутка (pointercancel) — оценку не трогаем. Мышью — сразу.
+    let press = null;
+    const drag = (e) => {
+      press.dragging = true;
+      slider.setPointerCapture(e.pointerId);
+      slider.classList.add("dragging");
+      setValue(fromX(e.clientX));
+    };
+    const release = () => { press = null; slider.classList.remove("dragging"); };
+    slider.addEventListener("pointerdown", (e) => {
+      if (e.button > 0) return;
+      press = { id: e.pointerId, x: e.clientX, dragging: false };
+      if (e.pointerType !== "touch") drag(e);
+    });
+    slider.addEventListener("pointermove", (e) => {
+      if (!press || press.id !== e.pointerId) return;
+      if (press.dragging) setValue(fromX(e.clientX));
+      else if (Math.abs(e.clientX - press.x) > 4) drag(e);
+    });
+    slider.addEventListener("pointerup", (e) => {
+      if (press && press.id === e.pointerId && !press.dragging) setValue(fromX(e.clientX));
+      release();
+    });
+    slider.addEventListener("pointercancel", release);
+    slider.addEventListener("keydown", (e) => {
+      const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+      if (step) setValue(value + step);
+      else if (e.key === "Home") setValue(1);
+      else if (e.key === "End") setValue(10);
+      else if (e.key === " " || e.key === "Enter") setValue(value); // согласиться со стартовыми 5
+      else return;
+      e.preventDefault();
+    });
     update();
     return row;
   }
@@ -1485,6 +1530,8 @@
     }
     tg.ready();
     tg.expand();
+    // свайп вниз в Telegram закрывает приложение — мешает ползункам колеса и прокрутке
+    if (tg.disableVerticalSwipes) try { tg.disableVerticalSwipes(); } catch (_) { /* старые клиенты */ }
     applyTheme();
     tg.onEvent("themeChanged", applyTheme);
     $("#edit-wheel").addEventListener("click", showWheel);
