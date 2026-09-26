@@ -13,6 +13,9 @@ RUN pip install -r requirements.txt
 
 COPY alembic.ini .
 COPY bot ./bot
+COPY webapp ./webapp
+
+EXPOSE 8080
 
 # /data — точка монтирования persistent volume на Fly.io (см. fly.toml).
 # Без volume база жила бы в файловой системе контейнера и пропадала при каждом деплое.

@@ -45,10 +45,22 @@ class Settings:
     planning_time: str = "09:00"
     # Ночной бэкап базы админам
     backup_time: str = "03:00"
+    # Mini App: публичный HTTPS-адрес приложения и порт веб-сервера внутри контейнера
+    webapp_url: str = ""
+    port: int = 8080
 
     @property
     def database_url(self) -> str:
         return f"sqlite+aiosqlite:///{self.database_path}"
+
+
+def _webapp_url() -> str:
+    """WEBAPP_URL, а на Fly по умолчанию https://<имя приложения>.fly.dev (Fly сам задаёт FLY_APP_NAME)."""
+    url = os.getenv("WEBAPP_URL", "").strip()
+    if url:
+        return url.rstrip("/")
+    app = os.getenv("FLY_APP_NAME", "").strip()
+    return f"https://{app}.fly.dev" if app else ""
 
 
 def load_settings() -> Settings:
@@ -64,6 +76,8 @@ def load_settings() -> Settings:
         checkin_time=os.getenv("CHECKIN_TIME", "18:00"),
         planning_time=os.getenv("PLANNING_TIME", "09:00"),
         backup_time=os.getenv("BACKUP_TIME", "03:00"),
+        webapp_url=_webapp_url(),
+        port=int(os.getenv("PORT", "8080")),
     )
 
 

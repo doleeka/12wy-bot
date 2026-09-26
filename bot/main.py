@@ -2,23 +2,35 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+
+import uvicorn
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from bot import texts
+from bot.commands import set_bot_commands, set_webapp_menu_button
 from bot.config import load_settings
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot import texts
-from bot.commands import set_bot_commands
 from bot.handlers import admin, checkin, cycle, fallback, group, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
+from webapp.app import create_app
+
+
+class WebServer(uvicorn.Server):
+    """uvicorn без своих обработчиков сигналов: остановкой управляет aiogram (см. main)."""
+
+    @contextlib.contextmanager
+    def capture_signals(self):  # noqa: ANN201
+        yield
 
 
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
@@ -66,6 +78,7 @@ async def main() -> None:
 
     try:
         await set_bot_commands(bot, settings)
+        await set_webapp_menu_button(bot, settings)
     except Exception:  # noqa: BLE001 — без меню бот всё равно работает
         logging.exception("Не удалось установить меню команд")
 
@@ -75,9 +88,18 @@ async def main() -> None:
     logging.info("DB: %s", settings.database_path.resolve())
     for admin_id in settings.admin_ids:
         await safe_send(bot, admin_id, texts.BOT_STARTED)
+    # Mini App (FastAPI) в том же процессе: общая база, тот же бот для уведомлений
+    web = WebServer(
+        uvicorn.Config(create_app(sessionmaker, settings, bot), host="0.0.0.0", port=settings.port, log_level="warning")
+    )
+    web_task = asyncio.create_task(web.serve())
+    logging.info("Mini App: порт %s, адрес %s", settings.port, settings.webapp_url or "не задан (WEBAPP_URL)")
     try:
+        # aiogram ловит SIGINT/SIGTERM и завершает polling; следом останавливаем веб-сервер
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        web.should_exit = True
+        await web_task
         scheduler.shutdown(wait=False)
         await bot.session.close()
         await engine.dispose()

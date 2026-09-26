@@ -31,7 +31,8 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings 
         scores = await wheel.get_scores(session, user)
         if not scores:
             welcome = texts.NEW_CYCLE_WELCOME if user.cycle > 1 else texts.WELCOME
-            await message.answer(welcome.format(name=name), reply_markup=keyboards.wheel_begin())
+            webapp_url = settings.webapp_url if settings else ""
+            await message.answer(welcome.format(name=name), reply_markup=keyboards.wheel_begin(webapp_url))
             return
         await message.answer(texts.WELCOME_BACK_WHEEL.format(name=name))
         text, markup = wheel_question(scores)

@@ -1,0 +1,102 @@
+/* Цвета интерфейса — из темы Telegram (--tg-theme-*), с запасными значениями для браузера. */
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg-2: var(--tg-theme-secondary-bg-color, #f2f2f5);
+  --text: var(--tg-theme-text-color, #0b0b0b);
+  --hint: var(--tg-theme-hint-color, #6d6d72);
+  --link: var(--tg-theme-link-color, #2a78d6);
+  --accent: var(--tg-theme-button-color, #2a78d6);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --line: color-mix(in srgb, var(--hint) 28%, transparent);
+
+  /* Диаграмма: палитра проверена валидатором (CVD, контраст) для обеих тем */
+  --series-now: #2a78d6;
+  --series-before: #eb6834;
+  --critical: #d03b3b;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --series-now: #3987e5;
+  --series-before: #d95926;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#app { max-width: 560px; margin: 0 auto; padding: 16px 16px 32px; }
+.screen[hidden] { display: none; }
+
+h1 { font-size: 26px; line-height: 1.2; margin: 4px 0 12px; }
+h2 { font-size: 17px; margin: 24px 0 8px; }
+p { margin: 0 0 12px; }
+.eyebrow { color: var(--hint); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; margin: 0; }
+.muted { color: var(--hint); }
+.small { font-size: 13px; font-weight: 400; }
+.center { text-align: center; margin-top: 40vh; }
+
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 12px 0 16px; display: grid; gap: 8px; }
+.steps li {
+  counter-increment: step; background: var(--bg-2); border-radius: 12px; padding: 12px 12px 12px 48px;
+  position: relative; display: grid; gap: 2px;
+}
+.steps li::before {
+  content: counter(step); position: absolute; left: 12px; top: 12px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-text); font-size: 13px; font-weight: 600;
+  display: grid; place-items: center;
+}
+.steps span { color: var(--hint); font-size: 14px; }
+
+/* ---------- колесо ---------- */
+.chart { position: relative; margin: 12px 0 4px; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.chart .axis { stroke: var(--line); stroke-width: 1; }
+.chart .area-now { fill: color-mix(in srgb, var(--series-now) 18%, transparent); stroke: var(--series-now); stroke-width: 2; stroke-linejoin: round; }
+.chart .area-before { fill: none; stroke: var(--series-before); stroke-width: 2; stroke-dasharray: 5 4; stroke-linejoin: round; }
+.chart .dot { fill: var(--series-now); stroke: var(--bg); stroke-width: 2; }
+.chart .hit { fill: transparent; cursor: pointer; }
+.chart .label { fill: var(--text); font-size: 14px; }
+.chart .label.unrated { fill: var(--hint); }
+.chart .label .warn { fill: var(--critical); }
+.tooltip {
+  position: absolute; transform: translate(-50%, -120%); pointer-events: none; white-space: nowrap;
+  background: var(--text); color: var(--bg); font-size: 13px; padding: 4px 8px; border-radius: 6px;
+}
+.legend { display: flex; gap: 16px; justify-content: center; font-size: 13px; color: var(--hint); margin-top: 4px; }
+.legend[hidden] { display: none; }
+.swatch { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--series-now); vertical-align: middle; margin-right: 6px; }
+.swatch.before { border-top: 2px dashed var(--series-before); }
+
+.spheres { display: grid; gap: 8px; margin-top: 12px; }
+.sphere { background: var(--bg-2); border-radius: 12px; padding: 10px 12px 8px; }
+.sphere-head { display: flex; align-items: center; gap: 8px; }
+.sphere-title { flex: 1; font-weight: 500; }
+.sphere-value { min-width: 28px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sphere.unrated .sphere-value { color: var(--hint); font-weight: 400; }
+.sphere.low .sphere-value::before { content: "⚠ "; color: var(--critical); }
+.sphere-remove { border: 0; background: none; color: var(--hint); font-size: 18px; padding: 0 0 0 4px; cursor: pointer; }
+.sphere input[type=range] { width: 100%; margin: 8px 0 2px; accent-color: var(--accent); height: 28px; }
+.sphere.unrated input[type=range] { opacity: .45; }
+.scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--hint); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px;
+  padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.chip:disabled { opacity: .4; cursor: default; }
+
+/* ---------- итог ---------- */
+.stat { display: flex; align-items: baseline; gap: 8px; justify-content: center; margin: 8px 0 12px; }
+.stat-value { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.card { background: var(--bg-2); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
+.card[hidden] { display: none; }
+.card p { margin: 4px 0 0; }
+.card.accent { border-left: 3px solid var(--accent); }
+.card ul { margin: 6px 0 0; padding-left: 18px; }
+.delta-up { color: var(--text); }
+.link { border: 0; background: none; color: var(--link); font: inherit; padding: 8px 0; cursor: pointer; }

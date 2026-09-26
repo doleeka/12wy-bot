@@ -3,8 +3,8 @@
 app = "twelve-weeks-astana"
 primary_region = "fra"
 
-# Бот работает через long polling: HTTP-сервисов и открытых портов нет,
-# поэтому секций [http_service]/[[services]] нет — машина просто работает постоянно.
+# Бот получает сообщения через long polling, а Mini App (FastAPI) слушает порт 8080 —
+# Fly отдаёт его наружу по HTTPS: https://twelve-weeks-astana.fly.dev (Telegram требует HTTPS).
 
 kill_signal = "SIGINT"
 kill_timeout = "10s"
@@ -18,7 +18,23 @@ kill_timeout = "10s"
   CHECKIN_TIME = "18:00"
   PLANNING_TIME = "09:00"
   BACKUP_TIME = "03:00"
+  PORT = "8080"
   # BOT_TOKEN и ADMIN_IDS — не здесь, а через `fly secrets set` (см. README)
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Машину НЕ усыплять без веб-трафика: в том же процессе работает бот (polling, расписание, бэкап)
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
 
 [[mounts]]
   source = "bot_data"

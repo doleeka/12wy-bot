@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.services.wheel import MAX_SCORE, MIN_SCORE, Sphere
@@ -12,10 +12,12 @@ from bot.services.wheel import MAX_SCORE, MIN_SCORE, Sphere
 #   wheel:finish
 
 
-def wheel_begin() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Начать колесо баланса 🎡", callback_data="wheel:begin")]]
-    )
+def wheel_begin(webapp_url: str = "") -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="Начать колесо баланса 🎡", callback_data="wheel:begin")]]
+    if webapp_url:
+        # Mini App — основной путь; кнопка в чате остаётся запасной, пока все шаги не переехали в приложение
+        rows.insert(0, [InlineKeyboardButton(text="🌿 Открыть приложение", web_app=WebAppInfo(url=webapp_url))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def wheel_scores(sphere: Sphere) -> InlineKeyboardMarkup:

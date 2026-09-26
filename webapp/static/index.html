@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>12 недель</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main id="app">
+    <!-- Загрузка -->
+    <section class="screen" id="screen-loading">
+      <p class="muted center">Загружаю…</p>
+    </section>
+
+    <!-- Открыто не из Telegram / ошибка -->
+    <section class="screen" id="screen-error" hidden>
+      <h1>Откройте через Telegram</h1>
+      <p class="muted" id="error-text">Это приложение работает внутри Telegram. Откройте бота и нажмите «Открыть приложение».</p>
+    </section>
+
+    <!-- Приветствие -->
+    <section class="screen" id="screen-welcome" hidden>
+      <p class="eyebrow">12 Week Year × Essentialism</p>
+      <h1>Привет, <span data-name></span>! 🌿</h1>
+      <p>Ближайшие <b>12 недель</b> мы проживём как один сфокусированный год.</p>
+      <p class="muted">Когда горизонт короткий, исчезает «ещё успею в декабре»: каждая неделя на счету, а прогресс видно сразу — через чек-ин и процент выполнения.</p>
+
+      <h2>Зачем здесь Essentialism</h2>
+      <p class="muted">12 недель легко забить десятком целей — и выгореть к шестой. Эссенциализм — это фильтр: <i>меньше, но лучше</i>.</p>
+      <ol class="steps">
+        <li><b>Explore</b><span>Сначала выпишем всё, что для тебя важно — без ограничений.</span></li>
+        <li><b>Eliminate</b><span>Оставим ровно <b>3</b> приоритета. Остальное — осознанное «не сейчас».</span></li>
+        <li><b>Execute</b><span>Превратим их в тактики на 12 недель и будем отмечать каждую неделю.</span></li>
+      </ol>
+      <p class="muted">А ещё у тебя будет маленькая команда — до 3 человек — чтобы поддерживать друг друга.</p>
+      <p>Начнём с <b>колеса баланса</b> — это пара минут.</p>
+    </section>
+
+    <!-- Колесо баланса -->
+    <section class="screen" id="screen-wheel" hidden>
+      <p class="eyebrow">Шаг 1 · Колесо баланса</p>
+      <h1>Как ты сейчас?</h1>
+      <p class="muted">Оцени каждую сферу от 1 до 10. Не думай долго — первая цифра обычно самая честная.</p>
+
+      <figure class="chart" aria-label="Колесо баланса">
+        <svg id="radar" role="img"></svg>
+        <div class="tooltip" id="radar-tip" hidden></div>
+        <figcaption class="legend" id="radar-legend" hidden>
+          <span><i class="swatch now"></i>сейчас</span>
+          <span><i class="swatch before"></i>12 недель назад</span>
+        </figcaption>
+      </figure>
+
+      <div id="sphere-list" class="spheres"></div>
+
+      <div class="extras">
+        <h2>Ещё сферы <span class="muted small">— по желанию, до 2</span></h2>
+        <div id="extra-chips" class="chips"></div>
+      </div>
+    </section>
+
+    <!-- Итог колеса -->
+    <section class="screen" id="screen-wheel-done" hidden>
+      <p class="eyebrow">Колесо баланса</p>
+      <h1>Твоё колесо</h1>
+      <figure class="chart">
+        <svg id="radar-done" role="img"></svg>
+        <figcaption class="legend" id="radar-done-legend" hidden>
+          <span><i class="swatch now"></i>сейчас</span>
+          <span><i class="swatch before"></i>12 недель назад</span>
+        </figcaption>
+      </figure>
+      <div class="stat"><span class="stat-value" id="avg"></span><span class="muted">средний балл</span></div>
+      <div id="lows" class="card"></div>
+      <div id="comparison" class="card" hidden></div>
+      <p class="muted">Это не оценка тебя — это карта. Просадки часто подсказывают, где сейчас живут самые важные изменения.</p>
+      <div class="card accent">
+        <b>Дальше — Explore 🔭</b>
+        <p class="muted">Этот шаг пока проходит в чате с ботом — я уже написала тебе. Скоро он переедет сюда.</p>
+      </div>
+      <button class="link" id="edit-wheel">Изменить оценки</button>
+    </section>
+
+    <!-- Шаги, которые пока в чате -->
+    <section class="screen" id="screen-later" hidden>
+      <h1>Привет, <span data-name></span>!</h1>
+      <p>Твои следующие шаги пока проходят в чате с ботом.</p>
+      <p class="muted">Скоро здесь появятся 12-недельный план, чек-ины с историей и твоя команда.</p>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

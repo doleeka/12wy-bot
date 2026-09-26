@@ -3,6 +3,31 @@
 Telegram-бот для комьюнити: ведёт участниц по системе 12 Week Year через фильтр Essentialism
 (Explore → Eliminate → Execute), с еженедельными чек-инами, скорингом и командами поддержки.
 
+## Mini App (приложение внутри Telegram)
+
+Переезд с чат-онбординга на Mini App идёт экран за экраном (бриф — `docs/miniapp-brief.md`).
+Бот и веб-сервер работают **в одном процессе**: aiogram (polling, расписание, бэкап) + FastAPI (API и статика
+фронтенда) на порту `PORT` (8080). Адрес приложения — `WEBAPP_URL`, на Fly по умолчанию
+`https://<app>.fly.dev`. Telegram открывает Mini App только по HTTPS.
+
+- **Авторизация** — без паролей: фронтенд шлёт `initData` из Telegram WebApp SDK (`Authorization: tma …`),
+  бэкенд проверяет подпись HMAC-SHA256 токеном бота и срок (сутки) — `webapp/auth.py`.
+- **Фронтенд** — чистые HTML/CSS/JS без сборки (`webapp/static/`), цвета из темы Telegram,
+  родные MainButton/BackButton и haptic.
+- `/start` показывает кнопку «🌿 Открыть приложение», а кнопка меню слева от поля ввода открывает приложение.
+  Пока шаги не переехали, в чате остаётся запасная кнопка и прежний онбординг.
+
+| Экран | Статус |
+|---|---|
+| Приветствие | ✅ в приложении |
+| Колесо баланса (ползунки + радар, сравнение с прошлым циклом) | ✅ в приложении |
+| Explore → Eliminate → Essential intent | в чате, переезжает следующим |
+| Тактики с 12-недельным планом (недели 1–12 у каждой тактики) | в разработке |
+| Итог, чек-ин, scorecard с историей, команда, настройки отчёта | в разработке |
+
+Локально Mini App проверяется через HTTPS-туннель: `cloudflared tunnel --url http://localhost:8080`
+(или ngrok), адрес туннеля — в `WEBAPP_URL`, затем `python -m bot.main`.
+
 ## Локальный запуск
 
 ```bash
@@ -59,6 +84,7 @@ bot/
   middlewares.py   сессия БД на каждый апдейт
   texts.py         все тексты бота
   keyboards.py     inline-клавиатуры
+  (webapp/)        FastAPI: app.py (API + статика), auth.py (initData), static/ (фронтенд)
   handlers/        group.py (чат команды: /linkteam, /unlinkteam, /team в группе),
                    start.py (/start), wheel.py (колесо баланса), cycle.py (итоги цикла, /newcycle),
                    onboarding.py (Explore, Eliminate, Intent, тактики, /plan),

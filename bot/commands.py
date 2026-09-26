@@ -5,7 +5,15 @@ import logging
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    MenuButtonCommands,
+    MenuButtonWebApp,
+    WebAppInfo,
+)
 
 from bot.config import Settings
 
@@ -40,3 +48,13 @@ async def set_bot_commands(bot: Bot, settings: Settings) -> None:
             await bot.set_my_commands(ADMIN_COMMANDS, scope=BotCommandScopeChat(chat_id=admin_id))
         except TelegramAPIError as e:  # админ ещё не писал боту — Telegram не знает этот чат
             log.warning("Меню админа %s не установлено: %s", admin_id, e)
+
+
+async def set_webapp_menu_button(bot: Bot, settings: Settings) -> None:
+    """Кнопка слева от поля ввода: открывает Mini App (или обычное меню команд, если адреса нет)."""
+    if settings.webapp_url:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Приложение", web_app=WebAppInfo(url=settings.webapp_url))
+        )
+    else:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
