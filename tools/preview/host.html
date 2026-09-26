@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Превью 12 недель</title>
+<style>
+:root {
+  --bg: #EFEBEA; --panel: #FFFFFF; --text: #1A1616; --hint: #5E5856; --line: #DDD6D4;
+  --accent: #7A1F2B; --on-accent: #FFFFFF; --tg-head: #FCFAF9; --tg-bar: #FCFAF9; --scrim: rgba(20,14,15,.45);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F0C0D; --panel: #1C1718; --text: #F3EEEE; --hint: #B3AAA9; --line: #3A3233;
+    --accent: #8E2433; --on-accent: #FFFFFF; --tg-head: #1C1718; --tg-bar: #1C1718; --scrim: rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F0C0D; --panel: #1C1718; --text: #F3EEEE; --hint: #B3AAA9; --line: #3A3233;
+  --accent: #8E2433; --on-accent: #FFFFFF; --tg-head: #1C1718; --tg-bar: #1C1718; --scrim: rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 860px) { .wrap { grid-template-columns: 300px 1fr; align-items: start; } }
+.side { display: grid; gap: 14px; }
+h1 { font-size: 20px; margin: 0; }
+.meta { color: var(--hint); font-size: 13px; margin: 4px 0 0; }
+.meta code { font-size: 12px; overflow-wrap: anywhere; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; }
+legend { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin-bottom: 6px; padding: 0; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button { border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.seg button:focus-visible, .tg-head button:focus-visible, .tg-main:focus-visible, .dlg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.warn-note { border-color: var(--accent); color: var(--text); display: grid; gap: 8px; }
+.warn-note button { justify-self: start; border: 1px solid var(--accent); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.note { font-size: 13px; color: var(--hint); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0; }
+.stage { display: flex; justify-content: center; }
+.phone { width: min(var(--w), 100%); height: var(--h); display: flex; flex-direction: column; background: var(--tg-bar);
+  border: 1px solid var(--line); border-radius: 22px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.12); position: relative; }
+.tg-head { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--tg-head); border-bottom: 1px solid var(--line); }
+.tg-head button { border: 0; background: none; color: var(--text); font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 8px; cursor: pointer; min-width: 72px; text-align: left; }
+.tg-head b { flex: 1; text-align: center; font-size: 15px; }
+.tg-head span { min-width: 72px; }
+iframe { flex: 1; width: 100%; border: 0; display: block; background: var(--tg-bar); }
+.tg-bar { flex: none; padding: 8px 12px 12px; background: var(--tg-bar); border-top: 1px solid var(--line); }
+.tg-main { width: 100%; height: 48px; border: 0; border-radius: 12px; color: #fff; font: 600 16px system-ui, sans-serif; cursor: pointer; }
+.tg-main[aria-disabled="true"] { cursor: not-allowed; }
+.cap { text-align: center; color: var(--hint); font-size: 12px; margin-top: 8px; }
+.dlg { position: absolute; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 24px; z-index: 5; }
+.dlg[hidden] { display: none; }
+.dlg div { background: var(--panel); color: var(--text); border-radius: 14px; padding: 18px; max-width: 300px; display: grid; gap: 14px; }
+.dlg p { margin: 0; }
+.dlg nav { display: flex; justify-content: flex-end; gap: 8px; }
+.dlg button { border: 0; background: none; color: var(--accent); font: 600 15px system-ui, sans-serif; padding: 6px 10px; cursor: pointer; border-radius: 8px; }
+:root[data-theme="dark"] .dlg button { color: #E07A89; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dlg button { color: #E07A89; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="side" aria-label="Настройки превью">
+    <div>
+      <h1>Превью 12 недель</h1>
+      <p class="meta">Блок C: вкладки «Сегодня / План / Прогресс».<br>
+        Ветка <code>claude/telegram-bot-12-week-year-7ssgo7</code>, коммит <code>__COMMIT__</code> (локальный, не опубликован).</p>
+    </div>
+    <fieldset><legend>Состояние</legend><div class="seg" id="modes">
+      <button data-mode="new">Новая участница</button><button data-mode="before">До старта</button><button data-mode="first">Неделя 1</button><button data-mode="mid">Неделя 3</button>
+    </div></fieldset>
+    <div class="note warn-note" id="new-note" hidden>
+      <b>Режим «Новая участница»: весь онбординг с нуля.</b> Всё, что вводишь, хранится только в памяти этой вкладки:
+      в бот и базу ничего не уходит, после перезагрузки страницы или «Начать заново» всё пропадёт. Смена темы и размера
+      экрана прогресс не сбрасывает. Сообщения бота в чат (про команду) в превью не приходят; после «Подтвердить план»
+      доступен режим «до старта» — отметки и чек-ин появятся только с начала цикла.
+      <button type="button" id="reset-new">Начать заново</button>
+    </div>
+    <fieldset><legend>Экран</legend><div class="seg" id="sizes">
+      <button data-size="390x844">390 × 844</button><button data-size="375x667">375 × 667</button>
+    </div></fieldset>
+    <fieldset><legend>Тема</legend><div class="seg" id="themes">
+      <button data-theme="light">Светлая</button><button data-theme="dark">Тёмная</button>
+    </div></fieldset>
+    <p class="note">Данные вымышленные: пользователь «Демо», без Telegram-подписи, токенов и реальных участниц. Ответы сервера записаны с настоящего API этой версии; дата в демо — <span id="demo-date"></span>. Отметки на «Сегодня» и чек-ин работают в пределах превью, правки плана не сохраняются. Шапка и нижняя кнопка — имитация Telegram.</p>
+  </section>
+  <section class="stage" aria-label="Mini App">
+    <div>
+      <div class="phone" id="phone">
+        <div class="tg-head"><button id="tg-back" type="button">✕ Закрыть</button><b>12 недель</b><span></span></div>
+        <iframe id="app" title="Mini App 12 недель"></iframe>
+        <div class="tg-bar" id="tg-bar" hidden><button class="tg-main" id="tg-main" type="button"></button></div>
+        <div class="dlg" id="dlg" hidden role="dialog" aria-modal="true"><div><p id="dlg-text"></p><nav><button id="dlg-no" type="button">Отмена</button><button id="dlg-ok" type="button">OK</button></nav></div></div>
+      </div>
+      <p class="cap" id="cap"></p>
+    </div>
+  </section>
+</div>
+<script>__BACKEND__</script>
+<script>
+const DATA = __DATA__;
+const $ = (s) => document.querySelector(s);
+const MODE_NAMES = { new: 'Новая участница', before: 'До старта', first: 'Неделя 1', mid: 'Неделя 3' };
+const freshBackend = () => { window.__demoNew = new DemoBackend({ today: DATA.today, cohortStart: DATA.cohort }); };
+freshBackend();
+const store = { get(k, d) { try { return localStorage.getItem('pv12.' + k) || d; } catch (_) { return d; } },
+                set(k, v) { try { localStorage.setItem('pv12.' + k, v); } catch (_) {} } };
+const sysDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+const cfg = { mode: store.get('mode', 'mid'), size: store.get('size', '390x844'), theme: store.get('theme', sysDark ? 'dark' : 'light') };
+$('#demo-date').textContent = new Date(DATA.today + 'T12:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: "numeric", weekday: "long" }).replace(/ г\.$/, "");
+let backVisible = false, dlgCb = null;
+window.__tgHost = {
+  main(s) {
+    const bar = $('#tg-bar'), b = $('#tg-main');
+    bar.hidden = !s.visible;
+    b.textContent = s.progress ? '…' : s.text;
+    b.style.background = s.color || (cfg.theme === 'dark' ? '#8E2433' : '#7A1F2B');
+    b.setAttribute('aria-disabled', String(!s.active));
+  },
+  back(v) { backVisible = v; $('#tg-back').textContent = v ? '‹ Назад' : '✕ Закрыть'; },
+  alert(m, cb) { openDlg(m, false, cb ? () => cb() : null); },
+  confirm(m, cb) { openDlg(m, true, cb); },
+};
+function openDlg(text, confirm, cb) {
+  dlgCb = cb; $('#dlg-text').textContent = text; $('#dlg-no').hidden = !confirm; $('#dlg').hidden = false; $('#dlg-ok').focus();
+}
+function closeDlg(ok) { $('#dlg').hidden = true; const cb = dlgCb; dlgCb = null; if (cb) cb(ok); }
+$('#dlg-ok').onclick = () => closeDlg(true);
+$('#dlg-no').onclick = () => closeDlg(false);
+$('#tg-main').onclick = () => { const w = $('#app').contentWindow; if (w && w.__demoMain) w.__demoMain(); };
+$('#tg-back').onclick = () => {
+  if (backVisible) { const w = $('#app').contentWindow; if (w && w.__demoBack) w.__demoBack(); }
+  else window.__tgHost.alert('В Telegram здесь Mini App закроется.');
+};
+function load() {
+  document.documentElement.dataset.theme = cfg.theme;
+  const [w, h] = cfg.size.split('x').map(Number);
+  const phone = $('#phone');
+  // высота окна Telegram = экран минус его шапка и нижняя кнопка; сама вебвью — iframe между ними
+  phone.style.setProperty('--w', w + 'px'); phone.style.setProperty('--h', h + 'px');
+  $('#cap').textContent = MODE_NAMES[cfg.mode] + ' · ' + w + ' × ' + h + ' · ' + (cfg.theme === 'dark' ? 'тёмная' : 'светлая') + ' · коммит ' + DATA.commit;
+  for (const [id, k] of [['#modes', 'mode'], ['#sizes', 'size'], ['#themes', 'theme']])
+    document.querySelectorAll(id + ' button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset[k] === cfg[k])));
+  window.__demoCfg = { mode: cfg.mode, theme: cfg.theme, fixtures: DATA.modes[cfg.mode] || {}, advice: DATA.advice };
+  $('#new-note').hidden = cfg.mode !== 'new';
+  window.__tgHost.main({ visible: false }); window.__tgHost.back(false); $('#dlg').hidden = true;
+  $('#app').srcdoc = DATA.inner;
+}
+for (const [id, k] of [['#modes', 'mode'], ['#sizes', 'size'], ['#themes', 'theme']])
+  $(id).addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; cfg[k] = b.dataset[k]; store.set(k, cfg[k]); load(); });
+$('#reset-new').addEventListener('click', () => { freshBackend(); load(); });
+load();
+</script>
+</body>
+</html>
