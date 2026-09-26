@@ -195,6 +195,23 @@ class Checkin(Base):
     tactic: Mapped[WeeklyTactic] = relationship(back_populates="checkins")
 
 
+class DailyMark(Base):
+    """«Сделано сегодня» по еженедельной тактике в её день (вкладка «Сегодня»).
+
+    Недельный процент по-прежнему считается по Checkin — одна отметка на тактику за неделю;
+    дневные отметки подсказывают её: все дни недели отмечены → тактика выполнена.
+    """
+
+    __tablename__ = "daily_marks"
+    __table_args__ = (UniqueConstraint("tactic_id", "day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tactic_id: Mapped[int] = mapped_column(ForeignKey("weekly_tactics.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class Team(Base):
     """Команда (аналог WAM), максимум 3 участницы."""
 

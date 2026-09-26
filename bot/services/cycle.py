@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models import Checkin, OnboardingStep, Priority, User, WeeklyTactic
+from bot.models import Checkin, DailyMark, OnboardingStep, Priority, User, WeeklyTactic
 from bot.services import checkins, scorecard, wheel
 
 CYCLE_DAYS = scorecard.CYCLE_WEEKS * 7
@@ -129,6 +129,7 @@ async def end_test_cycle(session: AsyncSession, user: User, real_start: date) ->
     result = await session.execute(
         delete(Checkin).where(Checkin.user_id == user.id, Checkin.week_start < real_start)
     )
+    await session.execute(delete(DailyMark).where(DailyMark.user_id == user.id, DailyMark.day < real_start))
     user.cycle_start = real_start
     user.last_reported_week = None
     await session.flush()

@@ -373,3 +373,63 @@ details.more[open] summary { margin-bottom: 6px; }
 .wk-list li span { color: var(--hint); font-size: 14px; }
 .plan-prio b .dot-p { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
 details.overview .plan-grid { margin-top: 10px; }
+
+/* ---------- нижние вкладки (после онбординга) ---------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; display: grid; grid-template-columns: repeat(3, 1fr);
+  background: var(--bg); border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+}
+.tabbar button {
+  display: grid; justify-items: center; gap: 2px; border: 0; background: none; color: var(--hint);
+  font: inherit; font-size: 12px; padding: 6px 0; cursor: pointer; border-radius: 10px;
+}
+.tabbar svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tabbar button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+:root[data-theme="dark"] .tabbar button[aria-current="page"] { color: var(--link); }
+body.has-tabs #app { padding-bottom: 84px; }
+
+/* ---------- «Сегодня» ---------- */
+.btn {
+  width: 100%; border: 0; border-radius: 12px; padding: 14px; font: inherit; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-text); margin: 4px 0 8px;
+}
+.btn.secondary { background: var(--bg-2); color: var(--text); }
+.ready-card { display: grid; gap: 2px; }
+.ready-card span { color: var(--hint); }
+.tasks { display: grid; gap: 6px; }
+.task {
+  display: flex; align-items: center; gap: 12px; background: var(--bg-2); border-radius: 12px; padding: 12px;
+  width: 100%; border: 0; font: inherit; color: var(--text); text-align: left; cursor: pointer;
+}
+.task .box {
+  width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--line); flex: none;
+  display: grid; place-items: center; color: transparent; font-size: 16px; font-weight: 700;
+}
+.task[aria-checked="true"] .box { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.task[aria-checked="true"] .t-text { color: var(--hint); text-decoration: line-through; }
+.task .t-main { flex: 1; min-width: 0; }
+.task .t-meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--hint); }
+.task .t-meta i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.progress-card .pc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.progress-card .ob-bar { margin-top: 10px; }
+.checkin-card b { display: block; }
+.checkin-card .btn { margin-top: 8px; }
+
+/* ---------- «Прогресс» ---------- */
+.tiles-3 { grid-template-columns: repeat(3, 1fr); }
+.tiles-3 .tile-value { font-size: 24px; }
+.history { display: grid; gap: 6px; margin-bottom: 8px; }
+.h-row { display: flex; align-items: center; gap: 10px; background: var(--bg-2); border-radius: 12px; padding: 10px 12px; }
+.h-row .h-week { font-weight: 600; min-width: 84px; }
+.h-row .h-dates { color: var(--hint); font-size: 13px; flex: 1; }
+.h-row .h-val { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.h-row .h-val small { display: block; font-weight: 400; font-size: 12px; color: var(--hint); }
+.progress-card { margin-top: 16px; }
+
+.progress-card { margin-top: 16px; }
+.pc-note { font-size: 13px; color: var(--hint); margin: 8px 0 0; }
+/* активная вкладка: не только цвет — ещё плашка и жирный текст */
+.tabbar button[aria-current="page"] { background: var(--accent-tint); }
+.empty-card { display: grid; gap: 6px; }
+.empty-card b { font-size: 17px; }
+#plan-edit-box .btn { margin-top: 10px; }

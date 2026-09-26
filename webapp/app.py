@@ -18,8 +18,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
-from bot.models import EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
+from bot.models import Checkin, EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
+from bot.services import today as today_svc
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
 from bot.handlers.checkin import advice_for, send_report
@@ -49,6 +50,16 @@ class EliminateIn(BaseModel):
 
 class IntentIn(BaseModel):
     intents: dict[int, str]
+
+
+class DailyIn(BaseModel):
+    tactic_id: int
+    done: bool
+
+
+class WeekMarkIn(BaseModel):
+    tactic_id: int
+    done: bool | None  # None — снять отметку
 
 
 class CheckinIn(BaseModel):
@@ -447,6 +458,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         week_tactics = await checkins.tactics_for_week(session, user, week)
         marks = await checkins.get_marks(session, user, week)
         done, planned, unmarked = checkins.summarize(week_tactics, marks)
+        daily = await today_svc.daily_marks(session, user, week)
         return {
             "status": "active",
             "week_number": n,
@@ -460,11 +472,99 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                     "priority_position": t.priority.position,
                     "priority_title": t.priority.title,
                     "done": marks.get(t.id),
+                    # все дни недели отмечены во вкладке «Сегодня» — подставим «сделано»
+                    "suggested": today_svc.suggested_done(t, week, daily),
                 }
                 for t in week_tactics
             ],
             "result": result_payload(done, planned) if planned and not unmarked else None,
         }
+
+    # ---------- Вкладка «Сегодня» ----------
+
+    def item(t: WeeklyTactic, **extra) -> dict:
+        return {
+            "id": t.id,
+            "text": t.text,
+            "label": tactics.weeks_label(t.weeks, t.days),
+            "priority_position": t.priority.position,
+            "priority_title": t.priority.title,
+        } | extra
+
+    @app.get("/api/today")
+    async def get_today(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        today = local_today(settings)
+        all_tactics = await checkins.active_tactics(session, user)
+        base = {
+            "today": today.isoformat(),
+            "weekday": today.weekday(),
+            "cycle_start": user.cycle_start.isoformat() if user.cycle_start else None,
+            "priorities": len({t.priority_id for t in all_tactics}),
+            "tactics": len(all_tactics),
+            "editable": before_start(user),
+        }
+        n = scorecard.week_number(user.cycle_start, today)
+        if n is None:
+            if user.cycle_start and today < user.cycle_start:
+                week1 = [t for t in all_tactics if t.in_week(1)]
+                return base | {
+                    "status": "not_started",
+                    "days_until": (user.cycle_start - today).days,
+                    "week1": [item(t) for t in week1],
+                }
+            return base | {"status": "over"}
+
+        week = scorecard.week_start(today)
+        week_tactics = [t for t in all_tactics if t.in_week(n)]
+        checkin = await checkins.get_marks(session, user, week)
+        daily = await today_svc.daily_marks(session, user, week)
+        states = {t.id: today_svc.week_state(t, week, checkin, daily) for t in week_tactics}
+        done = sum(1 for v in states.values() if v)
+        return base | {
+            "status": "active",
+            "week_number": n,
+            "week_start": week.isoformat(),
+            "week_end": (week + timedelta(days=6)).isoformat(),
+            # сегодня: еженедельные действия в свои дни — галочка «сделано сегодня»
+            "today_items": [
+                item(t, done=today in daily.get(t.id, set()))
+                for t in today_svc.scheduled_on(week_tactics, today)
+            ],
+            # на этой неделе: разовые, контрольные точки и еженедельные без дней — отметка за неделю
+            "week_items": [item(t, done=checkin.get(t.id)) for t in week_tactics if not today_svc.is_daily(t)],
+            "week_progress": {
+                "done": done,
+                "planned": len(week_tactics),
+                "percent": scorecard.percent(done, len(week_tactics)),
+            },
+            "checkin_done": bool(week_tactics) and all(t.id in checkin for t in week_tactics),
+        }
+
+    @app.post("/api/today/daily")
+    async def mark_daily(body: DailyIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        today = local_today(settings)
+        tactic = await own_tactic(session, user, body.tactic_id)
+        n = scorecard.week_number(user.cycle_start, today)
+        if n is None or not tactic.in_week(n) or not today_svc.scheduled_on([tactic], today):
+            raise HTTPException(status_code=422, detail="not_today")
+        await today_svc.set_daily(session, user, tactic, today, body.done)
+        return await get_today(user, session)
+
+    @app.post("/api/today/week")
+    async def mark_week(body: WeekMarkIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        require_step(user, *CHECKIN_STEPS)
+        today = local_today(settings)
+        week = scorecard.week_start(today)
+        tactic = await own_tactic(session, user, body.tactic_id)
+        if tactic.id not in {t.id for t in await checkins.tactics_for_week(session, user, week)}:
+            raise HTTPException(status_code=422, detail="not_this_week")
+        if body.done is None:
+            await today_svc.clear_week_mark(session, user, tactic.id, week)
+        else:
+            await checkins.set_mark(session, user, tactic.id, week, body.done)
+        return await get_today(user, session)
 
     def result_payload(done: int, planned: int) -> dict:
         value = scorecard.percent(done, planned) or 0
@@ -526,6 +626,16 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                         "future": week > scorecard.week_start(today),
                     }
                 )
+        done_total = 0
+        if user.cycle_start:
+            done_total = await session.scalar(
+                select(func.count(Checkin.id)).where(
+                    Checkin.user_id == user.id,
+                    Checkin.done,
+                    Checkin.week_start >= user.cycle_start,
+                    Checkin.week_start < user.cycle_start + timedelta(days=84),
+                )
+            )
         marked = [w["percent"] for w in weeks if w["percent"] is not None]
         avg = round(sum(marked) / len(marked)) if marked else None
         return {
@@ -534,6 +644,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "weeks": weeks,
             "average": avg,
             "average_level": scorecard.level(avg) if avg is not None else None,
+            "done_total": done_total,
             "thresholds": {"good": scorecard.EXCELLENT, "warning": scorecard.GOOD},
         }
 

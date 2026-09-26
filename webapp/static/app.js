@@ -6,7 +6,7 @@
   const $ = (sel) => document.querySelector(sel);
   const state = {
     me: null, wheel: null, scores: {}, touched: new Set(), extras: [],
-    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null, checkin: null, marks: {}, editPriority: null,
+    explore: null, picked: new Set(), intent: null, drafts: {}, plan: null, edit: null, checkin: null, marks: {}, editPriority: null, today: null,
   };
   let mainHandler = null;
   let backHandler = null;
@@ -119,6 +119,8 @@
 
   function show(id) {
     document.querySelectorAll(".screen").forEach((s) => (s.hidden = s.id !== id));
+    $("#tabbar").hidden = true;
+    document.body.classList.remove("has-tabs");
     status(null);
     onboardingProgress(id);
     window.scrollTo(0, 0);
@@ -701,7 +703,7 @@
     const peak = Math.max(...plan.load);
     if (!peak) return "";
     const week = plan.load.indexOf(peak) + 1;
-    return "Больше всего тактик — " + peak + " — на неделе " + week + ". Оставь буфер на непредвиденное: неделя, забитая на 100%, ломается от первого форс-мажора.";
+    return "Больше всего действий — " + peak + " — на неделе " + week + ". Оставь буфер на непредвиденное: неделя, забитая на 100%, ломается от первого форс-мажора.";
   }
 
   function renderTactics() {
@@ -1077,8 +1079,7 @@
       const count = plan.priorities.reduce((n, p) => n + p.tactics.length, 0);
       status(plan.priorities.length + " приоритета · " + count + " " + plural(count, "действие", "действия", "действий") + " · старт " + formatDate(plan.cycle_start), true);
     } else {
-      backButton(showHome);
-      mainButton("На главную", showHome);
+      tabs("plan");
     }
   }
 
@@ -1143,10 +1144,10 @@
         text = "Неделя " + w.n + ": " + w.percent + "% " + STATUS[w.level].icon + " " + STATUS[w.level].label;
       } else if (w.future) {
         el("rect", { class: "slot", x, y: y(100), width: bw, height: Y1 - y(100), rx: 3 }, svg);
-        text = "Неделя " + w.n + ": впереди · тактик по плану: " + w.planned;
+        text = "Неделя " + w.n + ": впереди · действий по плану: " + w.planned;
       } else {
         el("rect", { class: "missed", x, y: Y1 - 3, width: bw, height: 3, rx: 1.5 }, svg);
-        text = "Неделя " + w.n + ": " + (w.planned ? "не отмечена" : "буфер — тактик не было");
+        text = "Неделя " + w.n + ": " + (w.planned ? "не отмечена" : "буфер — действий не было");
       }
       const hit = el("rect", { x: cx - step / 2, y: Y0, width: step, height: Y1 - Y0 + 20, fill: "transparent" }, svg);
       const showTip = () => {
@@ -1163,47 +1164,176 @@
     svg.setAttribute("aria-label", sc.weeks.map((w) => "неделя " + w.n + ": " + (w.percent != null ? w.percent + "%" : "—")).join(", "));
   }
 
-  async function showHome() {
-    let sc, ci;
-    try {
-      [sc, ci] = await Promise.all([api("GET", "/api/scorecard"), api("GET", "/api/checkin")]);
-    } catch (e) { return failed(e); }
-    state.checkin = ci;
-    show("screen-home");
+  // ---------- нижние вкладки: Сегодня / План / Прогресс ----------
+
+  // Вкладки — после подтверждения плана; на них нет кнопки Telegram внизу: действия прямо в экране
+  function tabs(active) {
+    const bar = $("#tabbar");
+    bar.hidden = false;
+    document.body.classList.add("has-tabs");
+    bar.querySelectorAll("button").forEach((b) => {
+      if (b.dataset.tab === active) b.setAttribute("aria-current", "page");
+      else b.removeAttribute("aria-current");
+    });
+    if (tg) tg.MainButton.hide();
     backButton(null);
-    if (ci.status === "not_started") {
-      const days = daysUntil(ci.cycle_start);
-      $("#home-title").textContent = "Старт — " + formatDate(ci.cycle_start);
-      $("#home-sub").textContent = days > 0 ? "До начала 12 недель: " + days + " дн. До старта план ещё можно поменять." : "";
-      $("#home-week-label").textContent = "Неделя 1";
-      $("#home-week").textContent = "—";
-      $("#home-week-note").textContent = "ещё не началась";
-    } else if (ci.status === "active") {
-      $("#home-title").textContent = "Неделя " + ci.week_number + " из 12";
-      $("#home-sub").textContent = period(ci.week_start, ci.week_end);
-      $("#home-week-label").textContent = "Неделя " + ci.week_number;
-      $("#home-week").textContent = ci.result ? ci.result.percent + "%" : "—";
-      $("#home-week-note").textContent = ci.result ? STATUS[ci.result.level].icon + " " + STATUS[ci.result.level].label : ci.tactics.length ? "ещё не отмечена" : "буфер 🌿";
-    } else {
-      $("#home-title").textContent = "12 недель позади 🎉";
-      $("#home-sub").textContent = "Итоги и старт нового цикла — в чате с ботом.";
+  }
+
+  function taskRow(t, checked, onToggle, meta) {
+    const row = el2("button", "task");
+    row.type = "button";
+    row.setAttribute("role", "checkbox");
+    row.setAttribute("aria-checked", String(!!checked));
+    const box = el2("span", "box", "✓");
+    const main = el2("span", "t-main");
+    main.appendChild(el2("span", "t-text", t.text));
+    const m = el2("span", "t-meta");
+    const dot = el2("i");
+    dot.style.background = "var(--p" + t.priority_position + ")";
+    m.append(dot, document.createTextNode(meta || t.priority_title));
+    main.appendChild(m);
+    row.append(box, main);
+    row.addEventListener("click", onToggle);
+    return row;
+  }
+
+  const WEEKDAY_NAMES = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+
+  function renderToday(d) {
+    state.today = d;
+    ["before", "active", "over"].forEach((k) => ($("#today-" + k).hidden = true));
+    if (d.status === "not_started") {
+      $("#today-eyebrow").textContent = "Старт — " + formatDate(d.cycle_start);
+      $("#today-title").textContent = "До старта " + d.days_until + " " + plural(d.days_until, "день", "дня", "дней");
+      $("#today-before").hidden = false;
+      $("#today-plan-meta").textContent = d.priorities + " " + plural(d.priorities, "приоритет", "приоритета", "приоритетов") + " · " +
+        d.tactics + " " + plural(d.tactics, "действие", "действия", "действий") + " · 12 недель";
+      $("#today-week1-title").textContent = "Неделя 1 · " + period(d.cycle_start, addDays(d.cycle_start, 6));
+      const ul = $("#today-week1");
+      ul.innerHTML = "";
+      d.week1.forEach((t) => {
+        const li = el2("li", "p" + t.priority_position, t.text);
+        li.appendChild(el2("span", null, " · " + t.label));
+        ul.appendChild(li);
+      });
+      $("#today-open-plan").textContent = d.editable ? "Проверить и доработать план" : "Посмотреть план";
+      $("#today-edit-hint").textContent = d.editable ? "До " + formatDate(d.cycle_start) + " цели, «зачем» и действия можно менять." : "";
+      return;
     }
+    if (d.status === "over") {
+      $("#today-eyebrow").textContent = "12 недель";
+      $("#today-title").textContent = "12 недель позади 🎉";
+      $("#today-over").hidden = false;
+      return;
+    }
+    $("#today-active").hidden = false;
+    $("#today-eyebrow").textContent = "Неделя " + d.week_number + " из 12 · " + period(d.week_start, d.week_end);
+    $("#today-title").textContent = "Что делать сейчас";
+    $("#today-day").textContent = "Сегодня, " + WEEKDAY_NAMES[d.weekday];
+    const list = $("#today-list");
+    list.innerHTML = "";
+    d.today_items.forEach((t) => list.appendChild(taskRow(t, t.done, () => toggleDaily(t), t.priority_title)));
+    $("#today-empty").hidden = d.today_items.length > 0;
+    const wl = $("#week-list");
+    wl.innerHTML = "";
+    d.week_items.forEach((t) => wl.appendChild(taskRow(t, t.done === true, () => toggleWeek(t), t.label)));
+    $("#week-empty").hidden = d.week_items.length > 0;
+
+    const wp = d.week_progress;
+    $("#week-progress-text").textContent = "На этой неделе: " + wp.done + " из " + wp.planned + " выполнено";
+    $("#week-progress-pct").textContent = wp.percent != null ? wp.percent + "%" : "";
+    $("#week-progress-fill").style.width = (wp.percent || 0) + "%";
+    const sunday = d.weekday === 6;
+    $("#checkin-card-title").textContent = d.checkin_done ? "Чек-ин недели сделан ✓" : sunday ? "Сегодня — чек-ин недели" : "Чек-ин недели — в воскресенье";
+    $("#checkin-card-text").textContent = d.checkin_done
+      ? "Можно исправить отметки до конца недели."
+      : "Отметь по каждому действию: получилось или нет. Галочки выше уже подставлены.";
+    $("#today-checkin").textContent = d.checkin_done ? "Изменить отметки" : "Отметить неделю " + d.week_number;
+    $("#today-checkin").hidden = !wp.planned;
+  }
+
+  function addDays(iso, n) {
+    const [y, m, d] = iso.split("-").map(Number);
+    const x = new Date(y, m - 1, d + n);
+    return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+  }
+
+  async function toggleDaily(t) {
+    haptic.tick();
+    try { renderToday(await api("POST", "/api/today/daily", { tactic_id: t.id, done: !t.done })); } catch (e) { failed(e); }
+  }
+
+  async function toggleWeek(t) {
+    haptic.tick();
+    try { renderToday(await api("POST", "/api/today/week", { tactic_id: t.id, done: t.done === true ? null : true })); } catch (e) { failed(e); }
+  }
+
+  async function showToday() {
+    let d;
+    try { d = await api("GET", "/api/today"); } catch (e) { return failed(e); }
+    show("screen-today");
+    tabs("today");
+    renderToday(d);
+  }
+
+  async function showProgress() {
+    let sc;
+    try { sc = await api("GET", "/api/scorecard"); } catch (e) { return failed(e); }
+    show("screen-progress");
+    tabs("progress");
+    // пока нет ни одного чек-ина — не пустой график, а объяснение, когда появятся данные
+    const hasData = sc.weeks.some((w) => w.percent != null);
+    $("#progress-empty").hidden = hasData;
+    $("#progress-data").hidden = !hasData;
+    if (!hasData) {
+      const firstSunday = sc.cycle_start ? addDays(sc.cycle_start, 6) : null;
+      const current = sc.current_week ? sc.weeks[sc.current_week - 1] : null;
+      $("#progress-empty-title").textContent = sc.current_week ? "Неделя " + sc.current_week + " из 12 идёт" : "Цикл ещё не начался";
+      $("#progress-empty-text").textContent = sc.current_week
+        ? "Первый результат появится после чек-ина — в воскресенье, " + formatDate(addDays(current.week_start, 6)) + ". Дальше здесь будет % по неделям и история."
+        : "Старт — " + (sc.cycle_start ? formatDate(sc.cycle_start) : "скоро") + ". Первый результат — после чек-ина в воскресенье" +
+          (firstSunday ? ", " + formatDate(firstSunday) : "") + ". Дальше здесь будет % по неделям и история.";
+      return;
+    }
+    $("#progress-week").textContent = sc.current_week || "—";
+    $("#progress-done").textContent = sc.done_total;
     $("#home-avg").textContent = sc.average != null ? sc.average + "%" : "—";
-    $("#home-avg-note").textContent = sc.average_level ? STATUS[sc.average_level].icon + " " + STATUS[sc.average_level].label : "появится после первого чек-ина";
+    $("#home-avg-note").textContent = sc.average_level ? STATUS[sc.average_level].icon + " " + STATUS[sc.average_level].label : "после первого чек-ина";
     drawScoreChart($("#score-chart"), sc, $("#score-tip"));
 
-    if (ci.status === "active" && ci.tactics.length) {
-      mainButton(ci.result ? "Изменить отметки" : "Отметить неделю " + ci.week_number, showCheckin);
-    } else if (ci.status === "not_started") {
-      mainButton("Мой план", openPlanView);
-    } else {
-      mainButton("Вернуться в чат", () => tg.close());
+    const dips = sc.weeks.filter((w) => w.level === "critical");
+    const box = $("#progress-dips");
+    box.hidden = !dips.length;
+    if (dips.length) {
+      box.innerHTML = "";
+      box.appendChild(el2("b", null, "⚠ Просадки: " + dips.map((w) => "неделя " + w.n + " — " + w.percent + "%").join(", ")));
+      box.appendChild(el2("p", null, "Что помешало? Не хватило времени, действие слишком большое — или приоритет перестал быть важным? Оставь буфер на непредвиденное."));
     }
+    const hist = $("#progress-history");
+    hist.innerHTML = "";
+    const past = sc.weeks.filter((w) => !w.future);
+    if (!past.length) hist.appendChild(el2("p", "muted", "Первая неделя ещё не прошла — история появится после первого чек-ина."));
+    past.slice().reverse().forEach((w) => {
+      const row = el2("div", "h-row");
+      row.append(el2("span", "h-week", "Неделя " + w.n), el2("span", "h-dates", period(w.week_start, addDays(w.week_start, 6))));
+      const val = el2("span", "h-val", w.percent != null ? w.percent + "%" : "—");
+      val.appendChild(el2("small", null, w.percent != null ? STATUS[w.level].icon + " " + STATUS[w.level].label.split(",")[0].split(" —")[0] : w.planned ? "не отмечена" : "буфер"));
+      row.appendChild(val);
+      hist.appendChild(row);
+    });
   }
 
   async function openPlanView() {
     try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
     showPlan("view");
+  }
+
+  const showHome = showToday; // «домой» после онбординга — вкладка «Сегодня»
+
+  // Чек-ин из «Сегодня»: чек-ин API знает неделю (в понедельник — ещё прошлую, если не отмечена)
+  async function openCheckin() {
+    try { state.checkin = await api("GET", "/api/checkin"); } catch (e) { return failed(e); }
+    if (state.checkin.status === "active") showCheckin();
   }
 
   // ---------- Чек-ин ----------
@@ -1251,7 +1381,10 @@
   function showCheckin() {
     const ci = state.checkin;
     state.marks = {};
-    ci.tactics.forEach((t) => { if (t.done != null) state.marks[t.id] = t.done; });
+    ci.tactics.forEach((t) => {
+      if (t.done != null) state.marks[t.id] = t.done;
+      else if (t.suggested) state.marks[t.id] = true; // все дни отмечены во вкладке «Сегодня»
+    });
     show("screen-checkin");
     $("#checkin-eyebrow").textContent = "Чек-ин · неделя " + ci.week_number + " · " + period(ci.week_start, ci.week_end);
     backButton(showHome);
@@ -1281,15 +1414,15 @@
     haptic.err();
     const messages = {
       wrong_step: "Этот шаг уже пройден — открой приложение заново.",
-      mark_all: "Отметь все тактики этой недели.",
+      mark_all: "Отметь все действия этой недели.",
       week_closed: "Эта неделя уже закрыта для отметок.",
       plan_locked: "Цикл уже начался — план закрыт для изменений.",
-      last_tactic: "У каждой цели должна остаться хотя бы одна тактика.",
+      last_tactic: "У каждой цели должно остаться хотя бы одно действие.",
       bad_title: "Напиши цель.",
       not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
       pick_exactly_3: "Нужно выбрать ровно 3.",
       intent_required: "Нужно «зачем» для каждого приоритета — хотя бы пару предложений.",
-      empty_priority: "В каждом приоритете нужна хотя бы одна тактика.",
+      empty_priority: "В каждом приоритете нужно хотя бы одно действие.",
       limit: "Это максимум — меньше, но лучше.",
       bad_weeks: "Выбери хотя бы одну неделю.",
       pick_days: "Выбери хотя бы один день недели.",
@@ -1339,10 +1472,15 @@
       const box = $("#extra-chips");
       box.hidden = !box.hidden;
     });
-    $("#open-plan").addEventListener("click", openPlanView);
+    document.querySelectorAll("#tabbar button").forEach((b) => b.addEventListener("click", () => {
+      haptic.tick();
+      ({ today: showToday, plan: openPlanView, progress: showProgress })[b.dataset.tab]();
+    }));
+    $("#today-open-plan").addEventListener("click", openPlanView);
+    $("#today-checkin").addEventListener("click", openCheckin);
     $("#plan-edit").addEventListener("click", showTactics);
     $("#plan-reselect").addEventListener("click", () => {
-      tg.showConfirm("Выбрать 3 приоритета заново? Тактики нынешних приоритетов удалятся, команда останется.", async (ok) => {
+      tg.showConfirm("Выбрать 3 приоритета заново? Действия нынешних приоритетов удалятся, команда останется.", async (ok) => {
         if (!ok) return;
         try {
           state.explore = await api("POST", "/api/plan/reselect");

@@ -181,8 +181,8 @@
       <p class="muted" id="plan-start"></p>
       <div class="card accent" id="plan-edit-box" hidden>
         <b>До старта план можно менять</b>
-        <p class="muted">Поговорила с командой, передумала — поправь цели, «зачем» и тактики. С первого дня цикла план закроется.</p>
-        <button class="link" id="plan-edit">✏️ Изменить цели и тактики</button><br>
+        <p class="muted">Поговорила с командой, передумала — поправь цели, «зачем» и действия. С первого дня цикла план закроется.</p>
+        <button class="btn" id="plan-edit">Изменить цели и действия</button>
         <button class="link" id="plan-reselect">↺ Выбрать 3 приоритета заново</button>
       </div>
       <div id="plan-priorities"></div>
@@ -205,18 +205,65 @@
         <h1>Ты готова!</h1>
         <p id="ready-start"></p>
         <p id="ready-team"></p>
-        <p class="muted">Каждую неделю я буду присылать тактики этой недели для чек-ина. 85%+ — отлично, 70–84% — хорошо, ниже 70% — повод разобраться, что помешало. Не 100% — и это нормально.</p>
+        <p class="muted">Каждую неделю я буду присылать действия этой недели для чек-ина. 85%+ — отлично, 70–84% — хорошо, ниже 70% — повод разобраться, что помешало. Не 100% — и это нормально.</p>
       </div>
     </section>
 
-    <!-- Главная в цикле -->
-    <section class="screen" id="screen-home" hidden>
-      <p class="eyebrow" id="home-eyebrow">12 недель</p>
-      <h1 id="home-title"></h1>
-      <p class="muted" id="home-sub"></p>
-      <div class="tiles">
-        <div class="tile"><span class="tile-label">Средний результат</span><span class="tile-value" id="home-avg">—</span><span class="tile-note" id="home-avg-note"></span></div>
-        <div class="tile"><span class="tile-label" id="home-week-label">Эта неделя</span><span class="tile-value" id="home-week">—</span><span class="tile-note" id="home-week-note"></span></div>
+    <!-- Вкладка «Сегодня»: что мне делать сейчас? -->
+    <section class="screen tab-screen" id="screen-today" hidden>
+      <p class="eyebrow" id="today-eyebrow"></p>
+      <h1 id="today-title"></h1>
+
+      <!-- до старта -->
+      <div id="today-before" hidden>
+        <div class="card ready-card"><b>План готов ✓</b><span id="today-plan-meta"></span></div>
+        <div class="card week-card">
+          <b id="today-week1-title"></b>
+          <ul class="wk-list" id="today-week1"></ul>
+        </div>
+        <button class="btn" id="today-open-plan">Проверить и доработать план</button>
+        <p class="muted small" id="today-edit-hint"></p>
+      </div>
+
+      <!-- во время цикла -->
+      <div id="today-active" hidden>
+        <h2 id="today-day"></h2>
+        <div class="tasks" id="today-list"></div>
+        <p class="muted" id="today-empty" hidden>На сегодня по плану ничего нет — отдохни или загляни в действия недели 🌿</p>
+
+        <h2>На этой неделе</h2>
+        <div class="tasks" id="week-list"></div>
+        <p class="muted small" id="week-empty" hidden>Разовых действий на этой неделе нет.</p>
+
+        <div class="card progress-card">
+          <div class="pc-head"><b id="week-progress-text"></b><span id="week-progress-pct"></span></div>
+          <div class="ob-bar"><i id="week-progress-fill"></i></div>
+          <p class="pc-note">Действие засчитывается, когда отмечены все его дни на этой неделе. Итоговый % недели — по чек-ину.</p>
+        </div>
+        <div class="card checkin-card">
+          <b id="checkin-card-title"></b>
+          <p class="muted" id="checkin-card-text"></p>
+          <button class="btn" id="today-checkin">Отметить неделю</button>
+        </div>
+      </div>
+
+      <!-- после цикла -->
+      <p class="muted" id="today-over" hidden>Итоги и старт нового цикла — в чате с ботом.</p>
+    </section>
+
+    <!-- Вкладка «Прогресс»: как у меня получается? -->
+    <section class="screen tab-screen" id="screen-progress" hidden>
+      <p class="eyebrow" id="progress-eyebrow">12 недель</p>
+      <h1>Прогресс</h1>
+      <div class="card empty-card" id="progress-empty" hidden>
+        <b id="progress-empty-title"></b>
+        <p class="muted" id="progress-empty-text"></p>
+      </div>
+      <div id="progress-data">
+      <div class="tiles tiles-3">
+        <div class="tile"><span class="tile-label">Средний</span><span class="tile-value" id="home-avg">—</span><span class="tile-note" id="home-avg-note"></span></div>
+        <div class="tile"><span class="tile-label">Неделя</span><span class="tile-value" id="progress-week">—</span><span class="tile-note">из 12</span></div>
+        <div class="tile"><span class="tile-label">Выполнено</span><span class="tile-value" id="progress-done">0</span><span class="tile-note">действий</span></div>
       </div>
       <h2>По неделям</h2>
       <figure class="chart bars" aria-label="Процент выполнения по неделям">
@@ -228,14 +275,18 @@
           <span><i class="sq critical"></i>&lt;70% сбой</span>
         </figcaption>
       </figure>
-      <button class="link" id="open-plan">Мой план →</button>
+      <p class="muted small">Это ориентиры, а не оценка тебя: неделя ниже 70% — повод посмотреть, что помешало.</p>
+      <div class="card warn" id="progress-dips" hidden></div>
+      <h2>История чек-инов</h2>
+      <div class="history" id="progress-history"></div>
+      </div>
     </section>
 
     <!-- Чек-ин -->
     <section class="screen" id="screen-checkin" hidden>
       <p class="eyebrow" id="checkin-eyebrow"></p>
       <h1>Как прошла неделя?</h1>
-      <p class="muted">Отметь по каждой тактике: получилось или нет. Честно — это только для тебя, команда увидит лишь процент.</p>
+      <p class="muted">Отметь по каждому действию: получилось или нет. Честно — это только для тебя, команда увидит лишь процент.</p>
       <p class="counter" id="checkin-count"></p>
       <div id="checkin-list"></div>
     </section>
@@ -258,6 +309,13 @@
       <p class="muted">Скоро здесь появятся 12-недельный план, чек-ины с историей и твоя команда.</p>
     </section>
   </main>
+  <!-- Нижние вкладки — только после подтверждения плана -->
+  <nav class="tabbar" id="tabbar" hidden aria-label="Разделы">
+    <button type="button" data-tab="today"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Сегодня</button>
+    <button type="button" data-tab="plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>План</button>
+    <button type="button" data-tab="progress"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Прогресс</button>
+  </nav>
+
   <!-- Состояние под главной кнопкой: «Оценено 3 из 6», «Выбрано 2 из 3» -->
   <div class="cta-status" id="cta-status" hidden></div>
   <script src="/static/app.js"></script>
