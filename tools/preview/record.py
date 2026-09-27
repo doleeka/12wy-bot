@@ -3,15 +3,18 @@ import itertools, json, sqlite3, sys, tempfile
 from datetime import date, timedelta
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from bot import texts
 from bot.config import Settings
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
 from tests.webapp_helpers import TOKEN, sign_init_data
-from webapp.app import create_app
+import webapp.app as appmod
 
-today = date.today(); this_week = today - timedelta(days=today.weekday())
+# дата демо закреплена (суббота): есть «дела на сегодня», превью воспроизводимо
+today = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else date(2026, 9, 26); this_week = today - timedelta(days=today.weekday())
 out = {"today": today.isoformat(), "modes": {},
        "advice": {"good": texts.SCORE_ADVICE_EXCELLENT, "warning": texts.SCORE_ADVICE_GOOD, "critical": texts.SCORE_ADVICE_LOW}}
 
@@ -47,9 +50,9 @@ for mode in ("before", "first", "mid"):
         for tid, wd in [(1, 1), (1, 3), (3, 0), (3, 2), (3, 4)]:
             c.execute("INSERT INTO daily_marks (user_id, tactic_id, day) VALUES (1, ?, ?)", (tid, (this_week + timedelta(days=wd)).isoformat()))
     c.commit(); c.close()
-    app = create_app(create_sessionmaker(create_engine(f"sqlite+aiosqlite:///{db}")),
+    app = appmod.create_app(create_sessionmaker(create_engine(f"sqlite+aiosqlite:///{db}")),
                      Settings(bot_token=TOKEN, database_path=db, admin_ids=[]), None)
-    with TestClient(app) as cl:
+    with patch.object(appmod, "local_today", lambda _s: today), TestClient(app) as cl:
         h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
         get = lambda p: (lambda r: (r.raise_for_status(), r.json())[1])(cl.get(p, headers=h))
         m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent")}
