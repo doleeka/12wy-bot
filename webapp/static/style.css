@@ -340,6 +340,7 @@ details.more[open] summary { margin-bottom: 6px; }
 .extremes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .extremes .card { display: grid; gap: 4px; margin: 0 0 12px; }
 .extremes b { font-size: 17px; }
+.extremes.stack { grid-template-columns: 1fr; } /* длинные списки сфер — во всю ширину */
 .chips.quick { margin: 12px 0 4px; }
 .chips.quick .chip { font-size: 13px; padding: 6px 10px; }
 .items li span[contenteditable="true"] { outline: none; border-bottom: 1px solid var(--accent); }

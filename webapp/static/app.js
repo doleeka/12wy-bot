@@ -408,9 +408,16 @@
     const entries = ordered.map((s) => [s, w.scores[s.key]]);
     const min = Math.min(...entries.map((e) => e[1]));
     const max = Math.max(...entries.map((e) => e[1]));
-    const names = (v) => entries.filter((e) => e[1] === v).slice(0, 2).map(([s]) => s.emoji + " " + s.title).join(", ") + " " + v + "/10";
-    $("#wheel-low").textContent = names(min);
+    // все сферы с этой оценкой, а не первые две — иначе расходится с подсказками на следующем шаге
+    const at = (v) => entries.filter((e) => e[1] === v);
+    const names = (v) => at(v).map(([s]) => s.emoji + "\u00a0" + s.title).join(", ") + " — " + v + "/10";
+    const same = min === max;
+    $("#wheel-low-label").textContent = same ? "Все сферы оценены одинаково" : at(min).length > 1 ? "Самые низкие оценки сейчас" : "Самая низкая оценка сейчас";
+    $("#wheel-low").textContent = same ? min + "/10" : names(min);
+    $("#wheel-high-card").hidden = same;
+    $("#wheel-high-label").textContent = at(max).length > 1 ? "Самые высокие" : "Самая высокая";
     $("#wheel-high").textContent = names(max);
+    $("#wheel-low").parentElement.parentElement.classList.toggle("stack", same || at(min).length > 2 || at(max).length > 2);
 
     const cmp = $("#comparison");
     cmp.hidden = !w.comparison.length;
@@ -1150,7 +1157,7 @@
       backButton(null);
       $("#ready-start").textContent = "Неделя 1 из 12 начинается в понедельник, " + formatDate(state.plan.cycle_start) + ".";
       $("#ready-team").textContent = state.plan.team ? "Твоя команда — " + state.plan.team + " 🤝 Подробности я написала в чат." : "";
-      mainButton("На главную", showHome);
+      mainButton("Перейти к «Сегодня»", showHome);
     } catch (e) { failed(e); } finally { tg.MainButton.hideProgress(); }
   }
 
