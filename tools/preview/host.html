@@ -38,6 +38,9 @@ legend { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-sp
 .seg button:focus-visible, .tg-head button:focus-visible, .tg-main:focus-visible, .dlg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .warn-note { border-color: var(--accent); color: var(--text); display: grid; gap: 8px; }
 .warn-note button { justify-self: start; border: 1px solid var(--accent); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.toggle { justify-self: start; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+.toggle[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.toggle[aria-pressed="true"]::before { content: "● "; color: var(--accent); }
 .note { font-size: 13px; color: var(--hint); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0; }
 .stage { display: flex; justify-content: center; }
 .phone { width: min(var(--w), 100%); height: var(--h); display: flex; flex-direction: column; background: var(--tg-bar);
@@ -70,7 +73,7 @@ iframe { flex: 1; width: 100%; border: 0; display: block; background: var(--tg-b
         Ветка <code>claude/telegram-bot-12-week-year-7ssgo7</code>, коммит <code>__COMMIT__</code> (локальный, не опубликован).</p>
     </div>
     <fieldset><legend>Состояние</legend><div class="seg" id="modes">
-      <button data-mode="new">Новая участница</button><button data-mode="before">До старта</button><button data-mode="first">Неделя 1</button><button data-mode="mid">Неделя 3</button>
+      <button data-mode="new">Новая участница</button><button data-mode="before">До старта</button><button data-mode="first">Неделя 1</button><button data-mode="mid">Неделя 3</button><button data-mode="w12">Неделя 12</button>
     </div></fieldset>
     <div class="note warn-note" id="new-note" hidden>
       <b>Режим «Новая участница»: весь онбординг с нуля</b> — колесо, необязательное видение на 3+ года, 6 шагов плана. Всё, что вводишь, хранится только в памяти этой вкладки:
@@ -79,6 +82,10 @@ iframe { flex: 1; width: 100%; border: 0; display: block; background: var(--tg-b
       доступен режим «до старта» — отметки и чек-ин появятся только с начала цикла.
       <button type="button" id="reset-new">Начать заново</button>
     </div>
+    <fieldset><legend>Проверка ошибок</legend>
+      <button type="button" class="toggle" id="fail-vision" aria-pressed="false">Сбой следующего сохранения видения</button>
+      <p class="meta" id="fail-vision-note">Следующее «Сохранить» в видении или рефлексии не пройдёт, как при обрыве сети. Повторное — сработает.</p>
+    </fieldset>
     <fieldset><legend>Экран</legend><div class="seg" id="sizes">
       <button data-size="390x844">390 × 844</button><button data-size="375x667">375 × 667</button>
     </div></fieldset>
@@ -103,7 +110,16 @@ iframe { flex: 1; width: 100%; border: 0; display: block; background: var(--tg-b
 <script>
 const DATA = __DATA__;
 const $ = (s) => document.querySelector(s);
-const MODE_NAMES = { new: 'Новая участница', before: 'До старта', first: 'Неделя 1', mid: 'Неделя 3' };
+const MODE_NAMES = { new: 'Новая участница', before: 'До старта', first: 'Неделя 1', mid: 'Неделя 3', w12: 'Неделя 12' };
+let failVision = false;
+function setFailVision(on, consumed) {
+  failVision = on;
+  $('#fail-vision').setAttribute('aria-pressed', String(on));
+  $('#fail-vision-note').textContent = on
+    ? 'Включено: следующее «Сохранить» в видении или рефлексии не пройдёт, как при обрыве сети. Повторное — сработает.'
+    : consumed ? 'Сбой сымитирован. Текст должен остаться на экране — нажми «Сохранить» ещё раз.'
+    : 'Следующее «Сохранить» в видении или рефлексии не пройдёт, как при обрыве сети. Повторное — сработает.';
+}
 const freshBackend = () => { window.__demoNew = new DemoBackend({ today: DATA.today, cohortStart: DATA.cohort }); };
 freshBackend();
 const store = { get(k, d) { try { return localStorage.getItem('pv12.' + k) || d; } catch (_) { return d; } },
@@ -120,6 +136,7 @@ window.__tgHost = {
     b.style.background = s.color || (cfg.theme === 'dark' ? '#8E2433' : '#7A1F2B');
     b.setAttribute('aria-disabled', String(!s.active));
   },
+  consumeVisionFailure() { if (!failVision) return false; setFailVision(false, true); return true; },
   back(v) { backVisible = v; $('#tg-back').textContent = v ? '‹ Назад' : '✕ Закрыть'; },
   alert(m, cb) { openDlg(m, false, cb ? () => cb() : null); },
   confirm(m, cb) { openDlg(m, true, cb); },
@@ -152,6 +169,7 @@ function load() {
 for (const [id, k] of [['#modes', 'mode'], ['#sizes', 'size'], ['#themes', 'theme']])
   $(id).addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; cfg[k] = b.dataset[k]; store.set(k, cfg[k]); load(); });
 $('#reset-new').addEventListener('click', () => { freshBackend(); load(); });
+$('#fail-vision').addEventListener('click', () => setFailVision(!failVision, false));
 load();
 </script>
 </body>

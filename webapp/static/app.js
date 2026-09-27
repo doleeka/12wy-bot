@@ -472,6 +472,7 @@
     show("screen-vision");
     $("#vision-eyebrow").textContent = onb ? "Необязательно · 2–3 минуты" : "Видение · 3+ года";
     $("#vision-later").hidden = !onb;
+    $("#vision-next").hidden = !onb; // «дальше выберем 3 вещи» — только в онбординге, не в редакторе готового плана
     $("#vision-reflection").hidden = !(state.vision.reflection.open && !onb);
     // черновик (не сохранённый прошлый ввод) важнее сохранённого: при возврате ничего не теряется
     const draft = loadVisionDraft() || {};

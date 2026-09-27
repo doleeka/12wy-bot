@@ -97,13 +97,24 @@ MOCK = r"""
      M.vision = Object.assign(deep(M.vision), { vision: v, filled: Object.values(v).filter(Boolean).length, saved: true });
      return ok(deep(M.vision));
    }
-   if (p === 'vision/reflection') return fail(409, 'reflection_closed');
+   if (p === 'vision/reflection' && method === 'PUT') {
+     if (!M.vision.reflection.open) return fail(409, 'reflection_closed');
+     const r = {}; ['closer', 'changed', 'next'].forEach(f => { r[f] = String(body[f] || '').trim(); });
+     if (Object.values(r).some(x => Array.from(x).length > 1000)) return fail(422, 'too_long');
+     M.vision = deep(M.vision); Object.assign(M.vision.reflection, r);
+     return ok(deep(M.vision));
+   }
    host.alert('Демо-превью: в этом режиме правки плана не сохраняются. Попробовать редактирование можно в режиме «Новая участница».');
    return ok(deep(M.plan));
  }
  window.fetch = async (path, opts) => {
    opts = opts || {};
    const body = opts.body ? JSON.parse(opts.body) : null;
+   // оболочка демо: «сбой следующего сохранения видения» — как обрыв сети, срабатывает один раз
+   if ((opts.method || 'GET') === 'PUT' && /^\/api\/vision/.test(path) && host.consumeVisionFailure()) {
+     await new Promise(r => setTimeout(r, 300));
+     throw new TypeError('Failed to fetch');
+   }
    await new Promise(r => setTimeout(r, 120));
    const r = route(opts.method || 'GET', path, body);
    return new Response(JSON.stringify(r.data), { status: r.status, headers: { 'Content-Type': 'application/json' } });

@@ -18,9 +18,9 @@ today = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else date(2026, 9, 
 out = {"today": today.isoformat(), "modes": {},
        "advice": {"good": texts.SCORE_ADVICE_EXCELLENT, "warning": texts.SCORE_ADVICE_GOOD, "critical": texts.SCORE_ADVICE_LOW}}
 
-for mode in ("before", "first", "mid"):
+for mode in ("before", "first", "mid", "w12"):
     db = Path(tempfile.mkdtemp()) / "bot.db"; run_migrations(db)
-    start = {"mid": this_week - timedelta(days=14), "first": this_week}.get(mode, date(2026, 10, 5))
+    start = {"mid": this_week - timedelta(days=14), "first": this_week, "w12": this_week - timedelta(weeks=11)}.get(mode, date(2026, 10, 5))
     c = sqlite3.connect(db)
     c.executescript(f"""
     INSERT INTO users (id, telegram_id, first_name, onboarding_step, is_ready, send_report, cycle, cycle_start) VALUES (1, 1000001, 'Демо', 'DONE', 1, 'TEAM', 1, '{start}');
@@ -46,7 +46,17 @@ for mode in ("before", "first", "mid"):
          (1,1,'{w1}',1,1),(1,3,'{w1}',1,1),(1,4,'{w1}',1,1),(1,5,'{w1}',1,1),
          (1,1,'{w2}',2,1),(1,3,'{w2}',2,0),(1,4,'{w2}',2,1),(1,5,'{w2}',2,1);
         """)
-    if mode == "mid":  # видение заполнено частично — как бывает на практике
+    if mode == "w12":  # недели 1–11 отмечены: пара просадок, чтобы история и рефлексия выглядели живыми
+        in_week = {1: None, 2: [4, 8, 12], 3: None, 4: [1, 2, 3], 5: None}
+        missed = {(5, 3), (5, 6), (5, 9), (3, 5), (3, 6), (1, 10)}
+        for n in range(1, 12):
+            ws = (start + timedelta(weeks=n - 1)).isoformat()
+            for tid, weeks in in_week.items():
+                if weeks is None or n in weeks:
+                    c.execute("INSERT INTO checkins (user_id, tactic_id, week_start, week_number, done) VALUES (1, ?, ?, ?, ?)",
+                              (tid, ws, n, 0 if (tid, n) in missed else 1))
+        c.execute("UPDATE users SET last_reported_week = ?", ((start + timedelta(weeks=10)).isoformat(),))
+    if mode in ("mid", "w12"):  # видение заполнено частично — как бывает на практике
         c.execute("INSERT INTO visions (user_id, work, life, me, main) VALUES (1, ?, '', ?, ?)",
                   ("Веду свои занятия по английскому онлайн, доход стабильный", "Бегаю по утрам, свободно говорю по-английски",
                    "Спокойствие: сама выбираю, чем заниматься"))
