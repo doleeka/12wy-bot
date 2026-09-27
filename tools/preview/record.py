@@ -46,6 +46,10 @@ for mode in ("before", "first", "mid"):
          (1,1,'{w1}',1,1),(1,3,'{w1}',1,1),(1,4,'{w1}',1,1),(1,5,'{w1}',1,1),
          (1,1,'{w2}',2,1),(1,3,'{w2}',2,0),(1,4,'{w2}',2,1),(1,5,'{w2}',2,1);
         """)
+    if mode == "mid":  # видение заполнено частично — как бывает на практике
+        c.execute("INSERT INTO visions (user_id, work, life, me, main) VALUES (1, ?, '', ?, ?)",
+                  ("Веду свои занятия по английскому онлайн, доход стабильный", "Бегаю по утрам, свободно говорю по-английски",
+                   "Спокойствие: сама выбираю, чем заниматься"))
     if mode != "before":  # во вторник и четверг урок уже отмечен, пробежки — все три
         for tid, wd in [(1, 1), (1, 3), (3, 0), (3, 2), (3, 4)]:
             c.execute("INSERT INTO daily_marks (user_id, tactic_id, day) VALUES (1, ?, ?)", (tid, (this_week + timedelta(days=wd)).isoformat()))
@@ -55,7 +59,7 @@ for mode in ("before", "first", "mid"):
     with patch.object(appmod, "local_today", lambda _s: today), TestClient(app) as cl:
         h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
         get = lambda p: (lambda r: (r.raise_for_status(), r.json())[1])(cl.get(p, headers=h))
-        m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent")}
+        m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent", "vision")}
         m["states"] = {}
         t = m["today"]
         if t["status"] == "active":

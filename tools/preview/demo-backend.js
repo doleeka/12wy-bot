@@ -55,6 +55,8 @@
     this.priorities = [];  // {id, position, title, intent|null, item_id}
     this.tactics = [];     // {id, priority_id, text, weeks, days}
     this.team = null;
+    this.vision = null;      // {work, life, me, main} — видение 3+ года (необязательное)
+    this.reflection = null;  // {closer, changed, next} — рефлексия 12-й недели
   }
 
   const nextId = (rows) => rows.reduce((m, r) => Math.max(m, r.id), 0) + 1; // как SQLite rowid
@@ -153,6 +155,24 @@
       if (!days.length || days.some((d) => d < 0 || d > 6)) throw err(422, "bad_days");
       return [text, null, days];
     },
+    reflectionOpen() {
+      if (this.step !== "done" || !this.cycleStart) return false;
+      const days = daysBetween(this.cycleStart, this.today);
+      return days >= 0 && Math.floor(days / 7) + 1 >= WEEKS;
+    },
+    visionPayload() {
+      const V = ["work", "life", "me", "main"], R = ["closer", "changed", "next"];
+      const texts = {}; V.forEach((f) => { texts[f] = this.vision ? this.vision[f] : ""; });
+      const refl = { open: this.reflectionOpen(), cycle: 1 };
+      R.forEach((f) => { refl[f] = this.reflection ? this.reflection[f] : ""; });
+      return { vision: texts, filled: V.filter((f) => texts[f]).length, saved: this.vision != null, max_len: 1000, reflection: refl };
+    },
+    cleanTexts(body, fields) {
+      const out = {};
+      fields.forEach((f) => { out[f] = strip(body[f] == null ? "" : String(body[f])); });
+      if (Object.values(out).some((v) => len(v) > 1000)) throw err(422, "too_long");
+      return out;
+    },
     ownPriority(id) { const p = this.priorities.find((x) => x.id === id); if (!p) throw err(404, "no_priority"); return p; },
     ownTactic(id) { const t = this.tactics.find((x) => x.id === id); if (!t) throw err(404, "no_tactic"); return t; },
 
@@ -215,6 +235,16 @@
         if (!item) throw err(404, "no_item");
         item.text = text;
         return ok(this.explorePayload());
+      }
+
+      if (p === "vision") {
+        if (method === "GET") return ok(this.visionPayload());
+        if (method === "PUT") { this.vision = this.cleanTexts(body, ["work", "life", "me", "main"]); return ok(this.visionPayload()); }
+      }
+      if (p === "vision/reflection" && method === "PUT") {
+        if (!this.reflectionOpen()) throw err(409, "reflection_closed");
+        this.reflection = this.cleanTexts(body, ["closer", "changed", "next"]);
+        return ok(this.visionPayload());
       }
 
       if (p === "eliminate" && method === "PUT") {

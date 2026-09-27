@@ -14,7 +14,11 @@ import webapp.app as appmod
 HERE = Path(__file__).parent
 TODAY, COHORT = date(2026, 9, 26), date(2026, 10, 5)
 S = [
- ("GET", "/api/me", None), ("GET", "/api/wheel", None), ("GET", "/api/explore", None),
+ ("GET", "/api/me", None), ("GET", "/api/wheel", None), ("GET", "/api/explore", None), ("GET", "/api/vision", None),
+ ("PUT", "/api/vision", {"work": "  Своё дело  "}),
+ ("PUT", "/api/vision", {"work": "Своё дело", "life": "", "me": "Бегаю", "main": "я" * 1001}),
+ ("PUT", "/api/vision/reflection", {"closer": "Да"}),
+ ("GET", "/api/vision", None),
  ("POST", "/api/explore", {"text": "рано"}),
  ("PUT", "/api/wheel", {"scores": {"career": 7, "health": 4}}),
  ("PUT", "/api/wheel", {"scores": {"career": 7, "health": 4, "relationships": 8, "finance": 5, "growth": 6, "rest": 11}}),
@@ -87,6 +91,9 @@ S = [
  ("POST", "/api/tactics", {"priority_id": 2, "text": "Урок 45 минут", "days": [1, 3, 5]}),
  ("POST", "/api/tactics", {"priority_id": 3, "text": "Посмотреть 3 квартиры", "weeks": [6]}),
  ("POST", "/api/plan/confirm", None), ("GET", "/api/today", None), ("GET", "/api/scorecard", None),
+ ("PUT", "/api/vision", {"work": "Своё дело", "life": "Живу у моря", "me": "", "main": "Свобода"}),
+ ("PUT", "/api/vision", {}), ("GET", "/api/vision", None),
+ ("PUT", "/api/vision/reflection", {"closer": "Да"}),
 ]
 
 db = Path(tempfile.mkdtemp()) / "bot.db"; run_migrations(db)

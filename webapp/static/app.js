@@ -431,7 +431,129 @@
         cmp.querySelector("ul").appendChild(li);
       });
     }
-    mainButton("Продолжить", showExplore);
+    mainButton("Продолжить", () => showVision("onboarding"));
+  }
+
+  // ---------- Видение на 3+ года ----------
+  // Необязательно и не входит в 6 шагов: после колеса («Сохранить и продолжить» / «Сделаю позже») и во
+  // вкладке «План». Частичное заполнение — норма; пропуск ничего не удаляет; черновик переживает
+  // возврат и перезапуск; при ошибке сети текст остаётся на экране. Правится и после старта.
+
+  const VISION_FIELDS = ["work", "life", "me", "main"];
+  const REFL_FIELDS = ["closer", "changed", "next"];
+  const VISION_TITLES = { work: "💼 Работа и деньги", life: "❤️ Жизнь и отношения", me: "🌱 Ты сама", main: "✨ Что изменилось главное" };
+  const VISION_KEY = () => "12w-vision-draft-" + (tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : "");
+
+  function loadVisionDraft() {
+    try { return JSON.parse(localStorage.getItem(VISION_KEY()) || "null"); } catch (_) { return null; }
+  }
+  function storeVisionDraft(draft) {
+    try { draft ? localStorage.setItem(VISION_KEY(), JSON.stringify(draft)) : localStorage.removeItem(VISION_KEY()); } catch (_) { /* приватный режим */ }
+  }
+
+  function visionOnScreen() {
+    const pick = (attr, fields) => Object.fromEntries(fields.map((f) => [f, $("#screen-vision textarea[data-" + attr + "=" + f + "]").value]));
+    return { vision: pick("field", VISION_FIELDS), reflection: pick("refl", REFL_FIELDS) };
+  }
+
+  function visionDirty(cur) {
+    const d = state.vision;
+    const diff = (a, b, fields) => fields.some((f) => (a[f] || "").trim() !== (b[f] || "").trim());
+    return {
+      vision: diff(cur.vision, d.vision, VISION_FIELDS),
+      reflection: d.reflection.open && state.visionMode === "edit" && diff(cur.reflection, d.reflection, REFL_FIELDS),
+    };
+  }
+
+  async function showVision(mode, focusReflection) {
+    try { state.vision = await api("GET", "/api/vision"); } catch (e) { return failed(e); }
+    state.visionMode = mode;
+    const onb = mode === "onboarding";
+    show("screen-vision");
+    $("#vision-eyebrow").textContent = onb ? "Необязательно · 2–3 минуты" : "Видение · 3+ года";
+    $("#vision-later").hidden = !onb;
+    $("#vision-reflection").hidden = !(state.vision.reflection.open && !onb);
+    // черновик (не сохранённый прошлый ввод) важнее сохранённого: при возврате ничего не теряется
+    const draft = loadVisionDraft() || {};
+    VISION_FIELDS.forEach((f) => { $("#vision-" + f).value = (draft.vision || {})[f] ?? state.vision.vision[f]; });
+    REFL_FIELDS.forEach((f) => { $("#refl-" + f).value = (draft.reflection || {})[f] ?? state.vision.reflection[f]; });
+    document.querySelectorAll("#screen-vision textarea").forEach(autosize);
+    const dirty = visionDirty(visionOnScreen());
+    $("#vision-draft-note").hidden = !(dirty.vision || dirty.reflection);
+    backButton(onb ? (state.wheel ? showWheelDone : null) : () => openPlanView("vision"));
+    refreshVision();
+    if (focusReflection) $("#vision-reflection").scrollIntoView({ block: "start" });
+  }
+
+  function refreshVision() {
+    const cur = visionOnScreen();
+    const dirty = visionDirty(cur);
+    storeVisionDraft(dirty.vision || dirty.reflection ? cur : null);
+    const filled = VISION_FIELDS.filter((f) => cur.vision[f].trim()).length;
+    if (state.visionMode === "onboarding") {
+      mainButton("Сохранить и продолжить", saveVision, filled > 0 || dirty.vision);
+      status(filled ? "Заполнено " + filled + " из 4 — можно не всё" : "Напиши хотя бы один блок — или «Сделаю позже»", filled > 0);
+    } else {
+      const any = dirty.vision || dirty.reflection;
+      mainButton("Сохранить", saveVision, any);
+      status(any ? "Есть несохранённые изменения" : "Всё сохранено ✓", !any);
+    }
+  }
+
+  let savingVision = false;
+  async function saveVision() {
+    if (savingVision) return; // двойное нажатие
+    savingVision = true;
+    const cur = visionOnScreen();
+    const dirty = visionDirty(cur);
+    tg.MainButton.showProgress();
+    try {
+      let res = state.vision;
+      if (dirty.vision || !res.saved) res = await api("PUT", "/api/vision", cur.vision);
+      state.vision = res;
+      if (dirty.reflection) state.vision = await api("PUT", "/api/vision/reflection", cur.reflection);
+      storeVisionDraft(null);
+      haptic.ok();
+      state.visionMode === "onboarding" ? showExplore() : openPlanView("vision");
+    } catch (e) {
+      // не делаем вид, что сохранилось: текст остаётся на экране и в черновике, можно повторить
+      haptic.err();
+      tg.showAlert(e.detail === "too_long"
+        ? "Слишком длинно — сократи блок до 1000 символов."
+        : "Не получилось сохранить — текст остался на экране. Проверь интернет и нажми «Сохранить» ещё раз.");
+      refreshVision();
+    } finally { tg.MainButton.hideProgress(); savingVision = false; }
+  }
+
+  // вкладка «План» → «Видение»
+  async function renderVisionView() {
+    let d;
+    try { d = await api("GET", "/api/vision"); } catch (e) { return failed(e); }
+    state.vision = d;
+    $("#vision-empty").hidden = d.filled > 0;
+    $("#vision-view").hidden = !d.filled;
+    const box = $("#vision-blocks");
+    box.innerHTML = "";
+    VISION_FIELDS.forEach((f) => {
+      const item = el2("div");
+      item.append(el2("b", null, VISION_TITLES[f]), el2("p", d.vision[f] ? null : "muted", d.vision[f] || "пока не заполнено"));
+      box.appendChild(item);
+    });
+    const r = d.reflection;
+    const answered = REFL_FIELDS.some((f) => r[f]);
+    $("#vision-reflect-card").hidden = !r.open;
+    $("#vision-reflect-text").textContent = answered
+      ? "Ответы сохранены — можно дополнить. Их видишь только ты."
+      : "Три коротких вопроса по желанию: что изменилось и что берём дальше. На проценты недель не влияет.";
+    $("#vision-reflect").textContent = answered ? "Изменить ответы" : "Ответить";
+  }
+
+  function setPlanView(view) {
+    state.planView = view;
+    ["vision", "weeks"].forEach((v) => $("#plan-tab-" + v).setAttribute("aria-selected", String(v === view)));
+    $("#plan-vision").hidden = view !== "vision";
+    $("#plan-weeks-view").hidden = view !== "weeks";
+    if (view === "vision") renderVisionView();
   }
 
   // ---------- Explore ----------
@@ -546,7 +668,7 @@
       state.explore = await api("GET", "/api/explore");
     } catch (e) { return failed(e); }
     show("screen-explore");
-    backButton(null);
+    backButton(state.me.step === "explore" ? () => showVision("onboarding") : null);
     renderExplore();
   }
 
@@ -1137,6 +1259,8 @@
     $("#plan-buffer").textContent = bufferText(plan);
     $("#edit-plan").hidden = !review;
     $("#plan-edit-box").hidden = review || !plan.editable;
+    $("#plan-switch").hidden = review; // «Видение | 12 недель» — только в постоянной вкладке
+    setPlanView(review ? "weeks" : state.planView || "weeks");
     if (review) {
       backButton(showTactics);
       mainButton("Подтвердить план", confirmPlan);
@@ -1413,7 +1537,9 @@
     });
   }
 
-  async function openPlanView() {
+  async function openPlanView(view) {
+    // по умолчанию — текущие 12 недель; «Видение» — когда возвращаемся из его редактирования
+    state.planView = typeof view === "string" ? view : "weeks";
     try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
     showPlan("view");
   }
@@ -1578,6 +1704,12 @@
     $("#today-open-plan").addEventListener("click", openPlanView);
     $("#today-checkin").addEventListener("click", openCheckin);
     $("#plan-edit").addEventListener("click", showTactics);
+    document.querySelectorAll("#plan-switch button").forEach((b) => b.addEventListener("click", () => { haptic.tick(); setPlanView(b.dataset.view); }));
+    $("#vision-fill").addEventListener("click", () => showVision("edit"));
+    $("#vision-edit").addEventListener("click", () => showVision("edit"));
+    $("#vision-reflect").addEventListener("click", () => showVision("edit", true));
+    $("#vision-later").addEventListener("click", () => { haptic.tick(); showExplore(); }); // пропуск ничего не удаляет
+    document.querySelectorAll("#screen-vision textarea").forEach((ta) => ta.addEventListener("input", () => { autosize(ta); refreshVision(); }));
     $("details.overview").addEventListener("toggle", gridHint);
     window.addEventListener("resize", gridHint);
     $("#plan-reselect").addEventListener("click", () => {

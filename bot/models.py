@@ -1,7 +1,7 @@
 """Таблицы SQLite.
 
 users, wheel_of_balance, explore_list, priorities, essential_intent,
-weekly_tactics, checkins, teams, team_members
+weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members
 """
 from __future__ import annotations
 
@@ -210,6 +210,37 @@ class DailyMark(Base):
     tactic_id: Mapped[int] = mapped_column(ForeignKey("weekly_tactics.id", ondelete="CASCADE"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Vision(Base):
+    """Видение на 3+ года — одно на участницу, переживает циклы. Необязательное, любые блоки можно
+    оставить пустыми; редактируется и после старта (в отличие от тактического плана).
+    Личное: не уходит команде и в уведомления."""
+
+    __tablename__ = "visions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    work: Mapped[str] = mapped_column(Text, default="")     # работа и деньги
+    life: Mapped[str] = mapped_column(Text, default="")     # жизнь и отношения
+    me: Mapped[str] = mapped_column(Text, default="")       # ты сама: здоровье, навыки, образ жизни
+    main: Mapped[str] = mapped_column(Text, default="")     # что изменилось главное
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class VisionReflection(Base):
+    """Необязательная рефлексия на 12-й неделе цикла: ближе ли к видению. На скоринг не влияет."""
+
+    __tablename__ = "vision_reflections"
+    __table_args__ = (UniqueConstraint("user_id", "cycle"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    cycle: Mapped[int] = mapped_column(Integer)
+    closer: Mapped[str] = mapped_column(Text, default="")   # стала ли ближе к видению
+    changed: Mapped[str] = mapped_column(Text, default="")  # что изменилось
+    next: Mapped[str] = mapped_column(Text, default="")     # что берём в следующие 12 недель
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class Team(Base):

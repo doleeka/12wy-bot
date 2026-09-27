@@ -84,6 +84,33 @@
       <button class="link" id="edit-wheel">Изменить оценки</button>
     </section>
 
+    <!-- Видение на 3+ года: необязательно, не входит в 6 шагов. После колеса и во вкладке «План» -->
+    <section class="screen" id="screen-vision" hidden>
+      <p class="eyebrow" id="vision-eyebrow">Необязательно · 2–3 минуты</p>
+      <h1>Куда ты идёшь?</h1>
+      <p class="muted">Представь свою жизнь через 3 года. Не составляй идеальный план — просто опиши, какой хочешь её видеть. Хватит 1–2 предложений, заполнить можно не всё.</p>
+      <div class="vision-form">
+        <div class="intent"><label for="vision-work">💼 Работа и деньги</label>
+          <textarea id="vision-work" data-field="work" maxlength="1000" placeholder="Например: работаю удалённо на себя, доход стабильный и не зависит от одного клиента"></textarea></div>
+        <div class="intent"><label for="vision-life">❤️ Жизнь и отношения</label>
+          <textarea id="vision-life" data-field="life" maxlength="1000" placeholder="Например: живём рядом с родителями, вечера — с семьёй, а не в телефоне"></textarea></div>
+        <div class="intent"><label for="vision-me">🌱 Ты сама — здоровье, навыки, образ жизни</label>
+          <textarea id="vision-me" data-field="me" maxlength="1000" placeholder="Например: бегаю, свободно говорю по-английски, высыпаюсь"></textarea></div>
+        <div class="intent"><label for="vision-main">✨ Что изменилось главное?</label>
+          <textarea id="vision-main" data-field="main" maxlength="1000" placeholder="Например: я спокойнее и сама выбираю, чем заниматься"></textarea></div>
+      </div>
+      <div class="card note-card">Не нужно достичь всего за 12 недель — выбери ближайший шаг. Дальше выберем 3 вещи, которые приблизят тебя к этой жизни.</div>
+      <div id="vision-reflection" hidden>
+        <h2>12 недель позади: оглянись</h2>
+        <p class="muted small">По желанию — на проценты недель не влияет.</p>
+        <div class="intent"><label for="refl-closer">Ты стала ближе к своему видению?</label><textarea id="refl-closer" data-refl="closer" maxlength="1000"></textarea></div>
+        <div class="intent"><label for="refl-changed">Что изменилось?</label><textarea id="refl-changed" data-refl="changed" maxlength="1000"></textarea></div>
+        <div class="intent"><label for="refl-next">Что берём в следующие 12 недель?</label><textarea id="refl-next" data-refl="next" maxlength="1000"></textarea></div>
+      </div>
+      <p class="muted small" id="vision-draft-note" hidden>Есть несохранённый текст — он остался с прошлого раза.</p>
+      <button class="link" id="vision-later">Сделаю позже</button>
+    </section>
+
     <!-- Explore -->
     <section class="screen" id="screen-explore" hidden>
       <h1>Что для тебя важно прямо сейчас?</h1>
@@ -179,6 +206,29 @@
       <p class="eyebrow" id="plan-eyebrow">Итог</p>
       <h1 id="plan-title">Твой план на 12 недель</h1>
       <p class="muted" id="plan-start"></p>
+      <!-- во вкладке «План»: Видение | 12 недель (по умолчанию — 12 недель) -->
+      <div class="segmented" id="plan-switch" role="tablist" aria-label="Раздел плана" hidden>
+        <button type="button" role="tab" data-view="vision" id="plan-tab-vision">Видение</button>
+        <button type="button" role="tab" data-view="weeks" id="plan-tab-weeks">12 недель</button>
+      </div>
+      <div id="plan-vision" role="tabpanel" hidden>
+        <div class="card accent" id="vision-reflect-card" hidden>
+          <b>Неделя 12: ты стала ближе к своему видению?</b>
+          <p class="muted" id="vision-reflect-text"></p>
+          <button class="btn" id="vision-reflect">Ответить</button>
+        </div>
+        <div class="card empty-card" id="vision-empty" hidden>
+          <b>Видение ещё не заполнено</b>
+          <p class="muted">Какой ты хочешь видеть свою жизнь через 3 года? Четыре коротких блока, можно заполнить не всё — и поправить в любой момент.</p>
+          <button class="btn" id="vision-fill">Заполнить видение</button>
+        </div>
+        <div id="vision-view" hidden>
+          <div class="card vision-card" id="vision-blocks"></div>
+          <p class="muted small">Не нужно достичь всего за 12 недель — выбери ближайший шаг. Видение видишь только ты.</p>
+          <button class="btn secondary" id="vision-edit">Изменить видение</button>
+        </div>
+      </div>
+      <div id="plan-weeks-view">
       <div class="card accent" id="plan-edit-box" hidden>
         <b>До старта план можно менять</b>
         <p class="muted">Поговорила с командой, передумала — поправь цели, «зачем» и действия. С первого дня цикла план закроется.</p>
@@ -197,6 +247,7 @@
         <p class="muted small" id="plan-buffer"></p>
       </details>
       <button class="link" id="edit-plan" hidden>← Изменить действия</button>
+      </div>
     </section>
 
     <!-- Готова -->

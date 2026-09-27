@@ -21,6 +21,7 @@ from bot.config import Settings, local_today
 from bot.models import Checkin, EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
 from bot.services import today as today_svc
+from bot.services import vision as vision_svc
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
 from bot.handlers.checkin import advice_for, send_report
@@ -70,6 +71,19 @@ class CheckinIn(BaseModel):
 class PriorityIn(BaseModel):
     title: str
     intent: str
+
+
+class VisionIn(BaseModel):
+    work: str = ""
+    life: str = ""
+    me: str = ""
+    main: str = ""
+
+
+class ReflectionIn(BaseModel):
+    closer: str = ""
+    changed: str = ""
+    next: str = ""
 
 
 class TacticIn(BaseModel):
@@ -438,6 +452,53 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         await session.delete(tactic)
         await session.flush()
         return await plan_payload(session, user)
+
+    # ---------- Видение на 3+ года ----------
+    # Необязательное и личное: любые блоки можно оставить пустыми, правится в любой момент (и после
+    # старта — в отличие от тактического плана), команде и в уведомления не уходит.
+
+    async def vision_payload(session: AsyncSession, user: User) -> dict:
+        vision = await vision_svc.get_vision(session, user)
+        texts = {f: getattr(vision, f) if vision else "" for f in vision_svc.FIELDS}
+        today = local_today(settings)
+        refl = await vision_svc.get_reflection(session, user)
+        return {
+            "vision": texts,
+            "filled": sum(1 for v in texts.values() if v),
+            "saved": vision is not None,
+            "max_len": vision_svc.MAX_LEN,
+            "reflection": {
+                "open": vision_svc.reflection_open(user, today),
+                "cycle": user.cycle,
+                **{f: getattr(refl, f) if refl else "" for f in vision_svc.REFLECTION_FIELDS},
+            },
+        }
+
+    @app.get("/api/vision")
+    async def get_vision(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        return await vision_payload(session, user)
+
+    @app.put("/api/vision")
+    async def save_vision(body: VisionIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        try:
+            texts = vision_svc.clean(body.model_dump(), vision_svc.FIELDS)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="too_long") from None
+        await vision_svc.save_vision(session, user, texts)
+        return await vision_payload(session, user)
+
+    @app.put("/api/vision/reflection")
+    async def save_reflection(
+        body: ReflectionIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+    ) -> dict:
+        if not vision_svc.reflection_open(user, local_today(settings)):
+            raise HTTPException(status_code=409, detail="reflection_closed")
+        try:
+            texts = vision_svc.clean(body.model_dump(), vision_svc.REFLECTION_FIELDS)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="too_long") from None
+        await vision_svc.save_reflection(session, user, texts)
+        return await vision_payload(session, user)
 
     # ---------- Чек-ин и scorecard ----------
 

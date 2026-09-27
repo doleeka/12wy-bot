@@ -91,6 +91,13 @@ MOCK = r"""
      return ok(today());
    }
    if (p === 'checkin' && method === 'PUT') { saved = Object.assign({}, body.marks); return ok(result(saved)); }
+   if (p === 'vision' && method === 'PUT') {  // как на сервере: пустые блоки можно, длинные — нет
+     const v = {}; ['work', 'life', 'me', 'main'].forEach(f => { v[f] = String(body[f] || '').trim(); });
+     if (Object.values(v).some(x => Array.from(x).length > 1000)) return fail(422, 'too_long');
+     M.vision = Object.assign(deep(M.vision), { vision: v, filled: Object.values(v).filter(Boolean).length, saved: true });
+     return ok(deep(M.vision));
+   }
+   if (p === 'vision/reflection') return fail(409, 'reflection_closed');
    host.alert('Демо-превью: в этом режиме правки плана не сохраняются. Попробовать редактирование можно в режиме «Новая участница».');
    return ok(deep(M.plan));
  }
