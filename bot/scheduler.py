@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot import keyboards, texts
 from bot.backup_job import send_backup
+from bot.digest import send_admin_digest
 from bot.config import Settings, local_today
 from bot.handlers.checkin import build_checkin
 from bot.handlers.cycle import summary_text
@@ -87,6 +88,14 @@ def setup_scheduler(bot: Bot, sessionmaker: async_sessionmaker, settings: Settin
         CronTrigger(day_of_week="mon", hour=hour, minute=minute, timezone=settings.timezone),
         args=[bot, sessionmaker, settings],
         id="week_planning",
+        misfire_grace_time=3600,
+    )
+    hour, minute = _hm(settings.digest_time)
+    scheduler.add_job(
+        send_admin_digest,
+        CronTrigger(day_of_week="mon", hour=hour, minute=minute, timezone=settings.timezone),
+        args=[bot, sessionmaker, settings],
+        id="admin_digest",
         misfire_grace_time=3600,
     )
     hour, minute = _hm(settings.backup_time)

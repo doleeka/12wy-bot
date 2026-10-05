@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.backup_job import send_backup
 from bot.config import Settings, local_today
+from bot.digest import stats_message
 from bot.filters import IsAdmin
 from bot.models import OnboardingStep
 from bot.services.cycle import end_test_cycle, find_test_marks, in_test_mode, real_start_for, start_test_cycle
@@ -73,6 +74,12 @@ async def cmd_testcycle(
     await message.answer(texts.TEST_CYCLE_ON.format(start=f"{start:%d.%m}", week=week))
 
 
-@router.message(Command("backup", "resetme", "testcycle"))
+@router.message(Command("stats"), IsAdmin())
+async def cmd_stats(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
+    """Сводка сообщества: прошлая неделя и текущая. Только количество — без имён."""
+    await message.answer(await stats_message(session, settings, local_today(settings)))
+
+
+@router.message(Command("backup", "resetme", "testcycle", "stats"))
 async def backup_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)

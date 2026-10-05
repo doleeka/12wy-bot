@@ -45,6 +45,7 @@ class Settings:
     planning_time: str = "09:00"
     # Ночной бэкап базы админам
     backup_time: str = "03:00"
+    digest_time: str = "09:30"  # понедельник: сводка прошлой недели админу (после напоминания девочкам)
     # Общая дата старта цикла сообщества (понедельник). Кто готов раньше — стартует в этот день,
     # кто позже — с ближайшего понедельника. None — каждая со своего ближайшего понедельника.
     cycle_start: date | None = None
@@ -89,6 +90,7 @@ def load_settings() -> Settings:
         checkin_time=os.getenv("CHECKIN_TIME", "18:00"),
         planning_time=os.getenv("PLANNING_TIME", "09:00"),
         backup_time=os.getenv("BACKUP_TIME", "03:00"),
+        digest_time=os.getenv("DIGEST_TIME", "09:30"),
         cycle_start=_cycle_start(),
         webapp_url=_webapp_url(),
         port=int(os.getenv("PORT", "8080")),

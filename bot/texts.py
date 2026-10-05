@@ -173,6 +173,27 @@ TEAM_PREV = " (прошлая: {value})"
 
 ADMIN_USER_READY = "✅ {name} (id {tg_id}) прошла онбординг → {team}{new}"
 ADMIN_ONLY = "Эта команда только для админа."
+
+# ---------- Сводка для админа: только количество, без имён ----------
+
+ADMIN_DIGEST = (
+    "📊 <b>{title}</b> · {period}\n\n"
+    "Чек-ин сделали: <b>{checked} из {participants}</b>{missing}\n"
+    "Средний результат: <b>{avg}</b>\n"
+    "🟢 85%+: {good} · 🟡 70–84%: {warn} · 🔴 ниже 70%: {low}\n"
+    "Отмечают все недели без пропусков: {no_gaps}{buffer}\n\n"
+    "<b>Команды</b> — сделали чек-ин:\n{teams}\n\n"
+    "<i>Только количество — без имён, целей и действий.</i>"
+)
+ADMIN_DIGEST_MISSING = " · не отметили: {n}"
+ADMIN_DIGEST_BUFFER = "\nНеделя-буфер (действий по плану нет): {n}"
+ADMIN_DIGEST_TEAM = "• {team}: {checked} из {total}"
+ADMIN_DIGEST_NO_TEAMS = "• команд пока нет"
+ADMIN_DIGEST_EMPTY = "📊 <b>{title}</b> · {period}\n\nВ эту неделю ни у кого не шёл цикл — считать нечего."
+ADMIN_DIGEST_TITLE_DONE = "Итоги недели {n}"
+ADMIN_DIGEST_TITLE_RUNNING = "Неделя {n} — идёт"
+ADMIN_DIGEST_TITLE_PLAIN = "Неделя"
+ADMIN_DIGEST_RUNNING_NOTE = "\n\n<i>Неделя ещё не закончилась: чек-ин отмечают к воскресенью.</i>"
 ADMIN_MOVE_USAGE = (
     "Использование: <code>/moveteam &lt;telegram_id&gt; &lt;team_id&gt;</code>\n"
     "Вместо team_id можно написать <code>new</code> — создать новую команду.\n"
