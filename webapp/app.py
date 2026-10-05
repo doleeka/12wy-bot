@@ -473,6 +473,28 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         await session.flush()
         return await plan_payload(session, user)
 
+    # ---------- Моя команда: только проценты за неделю ----------
+
+    @app.get("/api/team")
+    async def get_team(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+        """Проценты тройки за эту и прошлую неделю — без целей, действий и приоритетов (как /team в чате)."""
+        team = await teams.get_team_of(session, user)
+        if team is None:
+            return {"team": None, "organizer": user.no_team, "members": []}
+        this_week = scorecard.week_start(local_today(settings))
+        members = []
+        for m in await teams.team_members(session, team.id):
+            current = await scorecard.week_percent(session, m, this_week)
+            prev = await scorecard.week_percent(session, m, this_week - timedelta(days=7))
+            members.append({
+                "name": m.first_name or "Участница",
+                "you": m.id == user.id,
+                "current": current,
+                "level": scorecard.level(current) if current is not None else None,
+                "prev": prev,
+            })
+        return {"team": teams.team_name(team), "organizer": False, "members": members}
+
     # ---------- Видение на 3+ года ----------
     # Необязательное и личное: любые блоки можно оставить пустыми, правится в любой момент (и после
     # старта — в отличие от тактического плана), команде и в уведомления не уходит.

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Team, TeamMember, User
@@ -59,11 +59,14 @@ async def _team_with_free_slot(session: AsyncSession) -> Team | None:
     )
 
 
-async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team, bool]:
+async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team | None, bool]:
     """Добавляет участницу в команду со свободным местом или создаёт новую.
 
     Возвращает (команда, создана_ли_новая). Коммитит сразу, внутри блокировки.
+    Организатора вне команд (no_team) не распределяем: (None, False).
     """
+    if user.no_team:
+        return None, False
     async with _lock:
         team = await get_team_of(session, user)
         if team is not None:
@@ -77,6 +80,16 @@ async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team, bool]
         session.add(TeamMember(team_id=team.id, user_id=user.id))
         await session.commit()
         return team, created
+
+
+async def leave_team(session: AsyncSession, user: User) -> Team | None:
+    """Убирает участницу из её команды (запись о членстве). Возвращает команду, где она была."""
+    async with _lock:
+        team = await get_team_of(session, user)
+        if team is not None:
+            await session.execute(delete(TeamMember).where(TeamMember.user_id == user.id))
+            await session.flush()
+        return team
 
 
 async def move_to_team(session: AsyncSession, user: User, team_id: int | None) -> tuple[Team | None, Team]:

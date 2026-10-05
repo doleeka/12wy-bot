@@ -1503,11 +1503,32 @@
     renderToday(d);
   }
 
+  // Моя команда: проценты тройки за неделю (без целей и действий); организатор вне команд — блока нет
+  async function renderTeam() {
+    let t;
+    try { t = await api("GET", "/api/team"); } catch (_) { $("#team-card").hidden = true; return; }
+    $("#team-card").hidden = !t.team;
+    if (!t.team) return;
+    $("#team-title").textContent = "🤝 " + t.team;
+    const box = $("#team-rows");
+    box.innerHTML = "";
+    t.members.forEach((m) => {
+      const row = el2("div", "team-row");
+      row.appendChild(el2("span", "tm-name", m.name + (m.you ? " (ты)" : "")));
+      const val = el2("span", "tm-val" + (m.current == null ? " none" : ""),
+        m.current != null ? STATUS[m.level].icon + " " + m.current + "%" : "не отмечено");
+      row.appendChild(val);
+      if (m.prev != null) row.appendChild(el2("small", null, "прошлая " + m.prev + "%"));
+      box.appendChild(row);
+    });
+  }
+
   async function showProgress() {
     let sc;
     try { sc = await api("GET", "/api/scorecard"); } catch (e) { return failed(e); }
     show("screen-progress");
     tabs("progress");
+    renderTeam();
     // пока нет ни одного чек-ина — не пустой график, а объяснение, когда появятся данные
     const hasData = sc.weeks.some((w) => w.percent != null);
     $("#progress-empty").hidden = hasData;

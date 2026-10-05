@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -80,6 +81,8 @@ class User(Base):
     last_reported_week: Mapped[date | None] = mapped_column(Date)
     # Режим проверки (/testcycle) включён с этого момента (UTC) — по нему отделяем тестовые отметки
     test_mode_since: Mapped[datetime | None] = mapped_column(DateTime)
+    # Организатор вне команд: не распределяется ни в одну тройку (/noteam)
+    no_team: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")

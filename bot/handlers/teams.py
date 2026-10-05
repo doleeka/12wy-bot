@@ -41,6 +41,9 @@ async def join_team(
     if existing is not None:
         await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))) + chat_line(existing))
         return existing
+    if user.no_team:  # организатор вне команд
+        await message.answer(texts.TEAM_NONE_ORGANIZER)
+        return None
     team, created = await teams.assign_to_team(session, user)
     members = await teams.team_members(session, team.id)
     name = escape(teams.team_name(team))
@@ -74,6 +77,8 @@ async def cmd_team(message: Message, session: AsyncSession, bot: Bot, settings: 
             await message.answer(texts.TEAM_NONE_YET)
             return
         team = await join_team(message, bot, session, user, settings)
+        if team is None:  # организатор вне команд — сообщение уже отправлено
+            return
 
     today = local_today(settings)
     n = scorecard.week_number(user.cycle_start, today)

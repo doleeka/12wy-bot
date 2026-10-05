@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -12,6 +14,7 @@ from bot.digest import stats_message
 from bot.filters import IsAdmin
 from bot.models import OnboardingStep
 from bot.services.cycle import end_test_cycle, find_test_marks, in_test_mode, real_start_for, start_test_cycle
+from bot.services import teams
 from bot.services.onboarding import reset_onboarding
 from bot.services.users import get_or_create_user
 
@@ -74,12 +77,26 @@ async def cmd_testcycle(
     await message.answer(texts.TEST_CYCLE_ON.format(start=f"{start:%d.%m}", week=week))
 
 
+@router.message(Command("noteam"), IsAdmin())
+async def cmd_noteam(message: Message, command: CommandObject, session: AsyncSession) -> None:
+    """Организатор вне команд: выйти из своей тройки и не попадать в распределение (/noteam off — вернуть)."""
+    user = await get_or_create_user(session, message.from_user)
+    if (command.args or "").strip().lower() == "off":
+        user.no_team = False
+        await message.answer(texts.NO_TEAM_OFF)
+        return
+    user.no_team = True
+    team = await teams.leave_team(session, user)
+    left = texts.NO_TEAM_LEFT.format(team=escape(teams.team_name(team))) if team else ""
+    await message.answer(texts.NO_TEAM_ON.format(left=left))
+
+
 @router.message(Command("stats"), IsAdmin())
 async def cmd_stats(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
     """Сводка сообщества: прошлая неделя и текущая. Только количество — без имён."""
     await message.answer(await stats_message(session, settings, local_today(settings)))
 
 
-@router.message(Command("backup", "resetme", "testcycle", "stats"))
+@router.message(Command("backup", "resetme", "testcycle", "stats", "noteam"))
 async def backup_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)

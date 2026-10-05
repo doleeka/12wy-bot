@@ -74,7 +74,7 @@ for mode in ("before", "first", "day2", "mid", "w12"):
     with patch.object(appmod, "local_today", lambda _s: m_today), TestClient(app) as cl:
         h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
         get = lambda p: (lambda r: (r.raise_for_status(), r.json())[1])(cl.get(p, headers=h))
-        m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent", "vision")}
+        m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent", "vision", "team")}
         m["states"] = {}
         t = m["today"]
         if t["status"] == "active":

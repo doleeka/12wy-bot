@@ -30,6 +30,7 @@ PARTICIPANT_COMMANDS = [
 ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),
     BotCommand(command="teams", description="Админ: все команды"),
+    BotCommand(command="noteam", description="Админ: я вне команд (off — вернуть)"),
     BotCommand(command="moveteam", description="Админ: перевести в команду"),
     BotCommand(command="report", description="Админ: куда слать отчёт"),
     BotCommand(command="backup", description="Админ: бэкап базы"),
