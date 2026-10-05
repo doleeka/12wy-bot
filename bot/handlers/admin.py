@@ -10,8 +10,8 @@ from bot.backup_job import send_backup
 from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.models import OnboardingStep
-from bot.services.cycle import end_test_cycle, start_test_cycle
-from bot.services.onboarding import cycle_start_for, reset_onboarding
+from bot.services.cycle import end_test_cycle, find_test_marks, in_test_mode, real_start_for, start_test_cycle
+from bot.services.onboarding import reset_onboarding
 from bot.services.users import get_or_create_user
 
 router = Router(name="admin")
@@ -42,11 +42,27 @@ async def cmd_testcycle(
         return
     arg = (command.args or "").strip().lower()
     today = local_today(settings)
-    if arg == "off":
-        real_start = cycle_start_for(today, settings.cycle_start if settings else None)
-        deleted = await end_test_cycle(session, user, real_start)
+    if arg in ("off", "off confirm"):
+        # идёт общий цикл — возвращаемся в него (05.10), а не на следующий понедельник
+        real_start = real_start_for(today, settings.cycle_start if settings else None)
+        if not in_test_mode(user, real_start):
+            await message.answer(texts.TEST_CYCLE_NOT_ON.format(start=f"{real_start:%d.%m}"))
+            return
+        if arg == "off":  # сначала — что именно изменится; без подтверждения ничего не трогаем
+            marks = await find_test_marks(session, user, real_start)
+            weeks = "\n".join(
+                texts.TEST_CYCLE_OFF_WEEK.format(start=f"{d:%d.%m}", n=n, done=done) for d, n, done in marks.by_week()
+            ) or texts.TEST_CYCLE_OFF_NO_WEEKS
+            await message.answer(texts.TEST_CYCLE_OFF_PREVIEW.format(
+                now=f"{user.cycle_start:%d.%m}" if user.cycle_start else "—", start=f"{real_start:%d.%m}",
+                weeks=weeks, daily=len(marks.daily),
+            ))
+            return
+        marks = await end_test_cycle(session, user, real_start)
         user.onboarding_step = OnboardingStep.DONE
-        await message.answer(texts.TEST_CYCLE_OFF.format(start=f"{real_start:%d.%m}", deleted=deleted))
+        await message.answer(texts.TEST_CYCLE_OFF.format(
+            start=f"{real_start:%d.%m}", checkins=len(marks.checkins), daily=len(marks.daily)
+        ))
         return
     if arg and not (arg.isdigit() and 1 <= int(arg) <= 12):
         await message.answer(texts.TEST_CYCLE_USAGE)

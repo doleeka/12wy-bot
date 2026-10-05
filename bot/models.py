@@ -1,7 +1,8 @@
 """Таблицы SQLite.
 
 users, wheel_of_balance, explore_list, priorities, essential_intent,
-weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members
+weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members,
+archived_checkins, archived_daily_marks
 """
 from __future__ import annotations
 
@@ -77,6 +78,8 @@ class User(Base):
     onboarding_position: Mapped[int | None] = mapped_column(Integer)
     # Понедельник последней недели, за которую уже отправлен отчёт (чтобы не слать повторно)
     last_reported_week: Mapped[date | None] = mapped_column(Date)
+    # Режим проверки (/testcycle) включён с этого момента (UTC) — по нему отделяем тестовые отметки
+    test_mode_since: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -210,6 +213,41 @@ class DailyMark(Base):
     tactic_id: Mapped[int] = mapped_column(ForeignKey("weekly_tactics.id", ondelete="CASCADE"), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ArchivedCheckin(Base):
+    """Отметка чек-ина, убранная из живых данных (тестовые недели /testcycle). Ничего не теряется:
+    все исходные поля + когда и почему перенесена. Без FK на тактику — архив не зависит от плана."""
+
+    __tablename__ = "archived_checkins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    original_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tactic_id: Mapped[int] = mapped_column(Integer)
+    week_start: Mapped[date] = mapped_column(Date)
+    week_number: Mapped[int] = mapped_column(Integer)
+    done: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    cycle_start_was: Mapped[date | None] = mapped_column(Date)  # тестовый старт, по которому считались недели
+    reason: Mapped[str] = mapped_column(String(32))
+    archived_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ArchivedDailyMark(Base):
+    """Дневная отметка, убранная из живых данных (см. ArchivedCheckin)."""
+
+    __tablename__ = "archived_daily_marks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    original_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tactic_id: Mapped[int] = mapped_column(Integer)
+    day: Mapped[date] = mapped_column(Date)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reason: Mapped[str] = mapped_column(String(32))
+    archived_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Vision(Base):

@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models import Checkin, DailyMark, OnboardingStep, Priority, User, WeeklyTactic
+from bot.models import ArchivedCheckin, ArchivedDailyMark, Checkin, DailyMark, OnboardingStep, Priority, User, WeeklyTactic
 from bot.services import checkins, scorecard, wheel
 
 CYCLE_DAYS = scorecard.CYCLE_WEEKS * 7
@@ -138,16 +138,72 @@ def start_test_cycle(user: User, today: date, week: int = 1) -> date:
         raise ValueError("Неделя — от 1 до 12")
     user.cycle_start = scorecard.week_start(today) - timedelta(days=7 * (week - 1))
     user.last_reported_week = None
+    if user.test_mode_since is None:  # повторный /testcycle N не сдвигает начало режима
+        user.test_mode_since = datetime.now(timezone.utc).replace(tzinfo=None)
     return user.cycle_start
 
 
-async def end_test_cycle(session: AsyncSession, user: User, real_start: date) -> int:
-    """Выход из режима проверки: настоящий старт и удаление отметок до него. Возвращает число удалённых."""
-    result = await session.execute(
-        delete(Checkin).where(Checkin.user_id == user.id, Checkin.week_start < real_start)
-    )
-    await session.execute(delete(DailyMark).where(DailyMark.user_id == user.id, DailyMark.day < real_start))
+def real_start_for(today: date, cohort_start: date | None) -> date:
+    """Настоящий старт при выходе из проверки: идёт общий цикл — его дата (а не следующий понедельник)."""
+    if cohort_start and cohort_start <= today < cohort_start + timedelta(weeks=scorecard.CYCLE_WEEKS):
+        return cohort_start
+    nearest = today + timedelta(days=(7 - today.weekday()) % 7)
+    return max(nearest, cohort_start) if cohort_start else nearest
+
+
+def in_test_mode(user: User, real_start: date) -> bool:
+    return user.test_mode_since is not None or (user.cycle_start is not None and user.cycle_start != real_start)
+
+
+@dataclass
+class TestMarks:
+    checkins: list[Checkin]
+    daily: list[DailyMark]
+
+    def by_week(self) -> list[tuple[date, int, int]]:
+        """(понедельник, отмечено, из них «сделано») — для предпросмотра."""
+        weeks: dict[date, list[int]] = {}
+        for c in self.checkins:
+            w = weeks.setdefault(c.week_start, [0, 0])
+            w[0] += 1
+            w[1] += int(c.done)
+        return [(d, n, done) for d, (n, done) in sorted(weeks.items())]
+
+
+async def find_test_marks(session: AsyncSession, user: User, real_start: date) -> TestMarks:
+    """Тестовые отметки: сделанные в режиме проверки (по времени создания/правки) — в том числе в неделе,
+    совпавшей с настоящей, — и всё до настоящего старта. Если начало режима неизвестно (режим включён
+    до появления этой отметки времени), тестовыми считаются все отметки аккаунта."""
+    since = user.test_mode_since
+    cq = select(Checkin).where(Checkin.user_id == user.id)
+    dq = select(DailyMark).where(DailyMark.user_id == user.id)
+    if since is not None:
+        cq = cq.where(or_(Checkin.week_start < real_start, Checkin.created_at >= since, Checkin.updated_at >= since))
+        dq = dq.where(or_(DailyMark.day < real_start, DailyMark.created_at >= since))
+    checkins = list(await session.scalars(cq.order_by(Checkin.week_start, Checkin.id)))
+    daily = list(await session.scalars(dq.order_by(DailyMark.day, DailyMark.id)))
+    return TestMarks(checkins, daily)
+
+
+async def end_test_cycle(session: AsyncSession, user: User, real_start: date) -> TestMarks:
+    """Выход из режима проверки: тестовые отметки переносятся в архив (все поля сохраняются, ничего
+    не удаляется безвозвратно), старт — настоящий. Даты других участниц не трогаем."""
+    marks = await find_test_marks(session, user, real_start)
+    for c in marks.checkins:
+        session.add(ArchivedCheckin(
+            original_id=c.id, user_id=c.user_id, tactic_id=c.tactic_id, week_start=c.week_start,
+            week_number=c.week_number, done=c.done, created_at=c.created_at, updated_at=c.updated_at,
+            cycle_start_was=user.cycle_start, reason="testcycle",
+        ))
+    for d in marks.daily:
+        session.add(ArchivedDailyMark(
+            original_id=d.id, user_id=d.user_id, tactic_id=d.tactic_id, day=d.day, created_at=d.created_at, reason="testcycle",
+        ))
+    await session.flush()  # сначала копия в архиве — потом убираем из живых таблиц, в одной транзакции
+    for row in marks.checkins + marks.daily:
+        await session.delete(row)
     user.cycle_start = real_start
     user.last_reported_week = None
+    user.test_mode_since = None
     await session.flush()
-    return result.rowcount
+    return marks
