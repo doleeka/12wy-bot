@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 PARTICIPANT_COMMANDS = [
     BotCommand(command="start", description="Начать / продолжить"),
     BotCommand(command="checkin", description="Чек-ин недели"),
-    BotCommand(command="plan", description="Мой план: приоритеты и тактики"),
+    BotCommand(command="plan", description="Мой план: приоритеты и действия"),
     BotCommand(command="team", description="Моя команда и проценты"),
     BotCommand(command="newcycle", description="Новый цикл после 12 недель"),
     BotCommand(command="help", description="Что умеет бот"),

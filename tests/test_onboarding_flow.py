@@ -92,7 +92,7 @@ async def test_full_onboarding(sessionmaker):
     msg = await bot.text("Больше заботиться о себе")
     assert "измеримой" in msg.answer.call_args.args[0]
     await bot.press(on_tactic_callback, "tac:keep", state=bot.state)
-    assert "Тактика добавлена" in bot.msg.answer.call_args.args[0]
+    assert "Действие добавлено" in bot.msg.answer.call_args.args[0]
     msg = await bot.text("3 тренировки по 30 минут")
     assert "Приоритет 2 из 3" in msg.answer.call_args.args[0]
 
