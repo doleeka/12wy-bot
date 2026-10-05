@@ -449,6 +449,8 @@ body.has-tabs #app { padding-bottom: 84px; }
 .task.locked.done .t-text { text-decoration: none; color: var(--text); }
 .task.locked.missed .box { border-color: var(--hint); color: var(--hint); }
 .note-card { font-size: 14px; }
+.edit-window { margin: -4px 0 12px; }
+.link.inline { display: inline; padding: 0; font-size: inherit; }
 .progress-card .pc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .progress-card .ob-bar { margin-top: 10px; }
 .checkin-card b { display: block; }

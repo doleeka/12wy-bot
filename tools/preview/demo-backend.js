@@ -65,7 +65,10 @@
     // ---------- вспомогательное ----------
     beforeStart() { return this.step === "done" && this.cycleStart != null && this.today < this.cycleStart; },
     requireStep(...steps) { if (!steps.includes(this.step)) throw err(409, "wrong_step"); },
-    requireEditable(...steps) { if (!steps.includes(this.step) && !this.beforeStart()) throw err(409, "plan_locked"); },
+    // план правится до старта и в первые 3 календарных дня цикла (как cycle.plan_editable)
+    editUntil() { return this.step === "done" && this.cycleStart ? addDays(this.cycleStart, 2) : null; },
+    planEditable() { const u = this.editUntil(); return u != null && this.today <= u; },
+    requireEditable(...steps) { if (!steps.includes(this.step) && !this.planEditable()) throw err(409, "plan_locked"); },
     cycleStartFor() {
       const nearest = addDays(this.today, (7 - weekday(this.today)) % 7);
       return this.cohortStart && this.cohortStart > nearest ? this.cohortStart : nearest;
@@ -137,7 +140,10 @@
       return {
         step: this.step, priorities: out, load, max_per_priority: MAX_TACTICS, recommended: [3, 8], weeks_total: WEEKS,
         cycle_start: this.cycleStart || this.cycleStartFor(), team: this.team,
-        editable: this.step === "tactics" || this.beforeStart(),
+        editable: this.step === "tactics" || this.planEditable(),
+        editable_until: this.editUntil(),
+        started: this.cycleStart != null && this.today >= this.cycleStart,
+        reselect_allowed: this.step === "tactics" || this.beforeStart(),
       };
     },
     cleanTactic(body) {
@@ -284,7 +290,7 @@
         return ok(this.planPayload());
       }
       if (p === "plan/reselect" && method === "POST") {
-        this.requireEditable("intent", "tactics");
+        if (!["intent", "tactics"].includes(this.step) && !this.beforeStart()) throw err(409, "plan_locked");
         this.step = "eliminate";
         return ok(this.explorePayload());
       }
@@ -321,7 +327,8 @@
         const all = this.activeTactics();
         const base = {
           today: this.today, weekday: weekday(this.today), cycle_start: this.cycleStart,
-          priorities: new Set(all.map((t) => t.priority_id)).size, tactics: all.length, editable: this.beforeStart(),
+          priorities: new Set(all.map((t) => t.priority_id)).size, tactics: all.length,
+          editable: this.planEditable(), editable_until: this.editUntil(),
         };
         if (this.today < this.cycleStart) {
           return ok(Object.assign(base, { status: "not_started", days_until: daysBetween(this.today, this.cycleStart),

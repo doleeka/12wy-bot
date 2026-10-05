@@ -115,6 +115,23 @@ async def wheel_comparison(session: AsyncSession, user: User) -> list[tuple[whee
     return [(s, before[s.key], v) for s, v in wheel.ordered_scores(now) if s.key in before]
 
 
+# План (цели, «зачем», действия, расписание) можно менять до старта и в первые 3 календарных дня цикла
+# по местному времени: старт 05.10 → правки до 07.10 включительно, с 08.10 план закрыт. Видение — всегда.
+PLAN_EDIT_GRACE_DAYS = 3
+
+
+def plan_edit_until(user: User) -> date | None:
+    """Последний день, когда подтверждённый план ещё можно менять (включительно)."""
+    if user.onboarding_step != OnboardingStep.DONE or user.cycle_start is None:
+        return None
+    return user.cycle_start + timedelta(days=PLAN_EDIT_GRACE_DAYS - 1)
+
+
+def plan_editable(user: User, today: date) -> bool:
+    until = plan_edit_until(user)
+    return until is not None and today <= until
+
+
 def start_test_cycle(user: User, today: date, week: int = 1) -> date:
     """Режим проверки для админа: сдвигает старт так, чтобы сегодня шла неделя week (1–12)."""
     if not 1 <= week <= scorecard.CYCLE_WEEKS:

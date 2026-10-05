@@ -139,10 +139,10 @@ async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker, not_
     plan = (await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})).json()
     assert len(plan["priorities"][0]["tactics"]) == 2
 
-    # после старта — только чтение
+    # после первых 3 дней цикла — только чтение
     async with sessionmaker() as session:
         user = await teams.get_user_by_telegram_id(session, 42)
-        user.cycle_start = date.today() - timedelta(days=date.today().weekday())
+        user.cycle_start = not_monday - timedelta(days=not_monday.weekday() + 7)
         await session.commit()
     assert (await api.get("/api/plan", headers=h)).json()["editable"] is False
     r = await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "ещё", "days": [0]})

@@ -1232,8 +1232,7 @@
     show("screen-plan");
     $("#plan-eyebrow").textContent = review ? "Проверь перед стартом" : "12 недель";
     $("#plan-title").textContent = review ? "Твой план на 12 недель" : "Мой план";
-    const [y, m, d] = plan.cycle_start.split("-").map(Number);
-    const started = new Date(y, m - 1, d) <= new Date();
+    const started = plan.started; // по дате сервера (Астана), а не по часам телефона
     $("#plan-start").textContent =
       (started ? "Цикл идёт с " : "Старт — в понедельник, ") + formatDate(plan.cycle_start) +
       (plan.team ? " · " + plan.team : "");
@@ -1260,6 +1259,14 @@
     $("#plan-buffer").textContent = bufferText(plan);
     $("#edit-plan").hidden = !review;
     $("#plan-edit-box").hidden = review || !plan.editable;
+    if (!review && plan.editable && plan.editable_until) {
+      // точный срок — по тем же данным, по которым сервер разрешает правки
+      const before = !started;
+      $("#plan-edit-title").textContent = "План можно менять до " + formatDate(plan.editable_until) + " включительно";
+      $("#plan-edit-text").textContent = (before ? "Поговорила с командой, передумала — " : "Первые 3 дня цикла — чтобы подстроить план под реальную неделю: ") +
+        "цели, «зачем», действия и их дни. С " + formatDate(addDays(plan.editable_until, 1)) + " план закроется. Видение можно менять всегда.";
+      $("#plan-reselect").hidden = !plan.reselect_allowed; // «заново» — только до старта: иначе пропали бы отметки первых дней
+    }
     $("#plan-switch").hidden = review; // «Видение | 12 недель» — только в постоянной вкладке
     setPlanView(review ? "weeks" : state.planView || "weeks");
     if (review) {
@@ -1421,7 +1428,8 @@
         ul.appendChild(li);
       });
       $("#today-open-plan").textContent = d.editable ? "Проверить и доработать план" : "Посмотреть план";
-      $("#today-edit-hint").textContent = d.editable ? "До " + formatDate(d.cycle_start) + " цели, «зачем» и действия можно менять." : "";
+      $("#today-edit-hint").textContent = d.editable && d.editable_until
+        ? "Цели, «зачем» и действия можно менять до " + formatDate(d.editable_until) + " включительно — и в первые 3 дня цикла." : "";
       return;
     }
     if (d.status === "over") {
@@ -1431,6 +1439,10 @@
       return;
     }
     $("#today-active").hidden = false;
+    // первые 3 дня цикла: план ещё можно поправить — точный срок и вход в план
+    const win = $("#today-edit-window");
+    win.hidden = !(d.editable && d.editable_until);
+    if (!win.hidden) win.querySelector("span").textContent = "План ещё можно поправить — до " + formatDate(d.editable_until) + " включительно.";
     $("#today-eyebrow").textContent = "Неделя " + d.week_number + " из 12 · " + period(d.week_start, d.week_end);
     $("#today-title").textContent = "Что делать сейчас";
     $("#today-day").textContent = "Сегодня, " + WEEKDAY_NAMES[d.weekday];
@@ -1636,7 +1648,7 @@
       wrong_step: "Этот шаг уже пройден — открой приложение заново.",
       mark_all: "Отметь все действия этой недели.",
       week_closed: "Эта неделя уже закрыта для отметок.",
-      plan_locked: "Цикл уже начался — план закрыт для изменений.",
+      plan_locked: "План закрыт для изменений: править можно до старта и в первые 3 дня цикла. Видение — всегда.",
       last_tactic: "У каждой цели должно остаться хотя бы одно действие.",
       bad_title: "Напиши цель.",
       not_enough: "Нужно хотя бы 3 пункта, чтобы было из чего выбирать.",
@@ -1703,6 +1715,7 @@
       ({ today: showToday, plan: openPlanView, progress: showProgress })[b.dataset.tab]();
     }));
     $("#today-open-plan").addEventListener("click", openPlanView);
+    $("#today-edit-plan").addEventListener("click", openPlanView);
     $("#today-checkin").addEventListener("click", openCheckin);
     $("#plan-edit").addEventListener("click", showTactics);
     document.querySelectorAll("#plan-switch button").forEach((b) => b.addEventListener("click", () => { haptic.tick(); setPlanView(b.dataset.view); }));

@@ -96,31 +96,41 @@ S = [
  ("PUT", "/api/vision/reflection", {"closer": "Да"}),
 ]
 
-db = Path(tempfile.mkdtemp()) / "bot.db"; run_migrations(db)
-real = []
-with patch.object(appmod, "local_today", lambda s: TODAY):
-    app = appmod.create_app(create_sessionmaker(create_engine(f"sqlite+aiosqlite:///{db}")),
-                            Settings(bot_token=TOKEN, database_path=db, admin_ids=[], cycle_start=COHORT), None)
-    with TestClient(app) as cl:
-        h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
-        for m, p, b in S:
-            r = cl.request(m, p, headers=h, json=b)
-            real.append({"status": r.status_code, "data": r.json()})
+# Два прогона: до старта (суббота 26.09) и в день старта (понедельник 05.10 — окно правок первых 3 дней)
+SCENARIO = S
+total_bad = 0
+for TODAY in (date(2026, 9, 26), date(2026, 10, 5)):
+    db = Path(tempfile.mkdtemp()) / "bot.db"; run_migrations(db)
+    real = []
+    with patch.object(appmod, "local_today", lambda s: TODAY):
+        app = appmod.create_app(create_sessionmaker(create_engine(f"sqlite+aiosqlite:///{db}")),
+                                Settings(bot_token=TOKEN, database_path=db, admin_ids=[], cycle_start=COHORT), None)
+        with TestClient(app) as cl:
+            h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
+            for m, p, b in S:
+                r = cl.request(m, p, headers=h, json=b)
+                real.append({"status": r.status_code, "data": r.json()})
 
-js = f"""
-const B = require({json.dumps(str(HERE / 'demo-backend.js'))});
-const b = new B({{ today: "{TODAY}", cohortStart: "{COHORT}" }});
-const S = {json.dumps(S, ensure_ascii=False)};
-console.log(JSON.stringify(S.map(([m, p, body]) => b.handle(m, p, body ? JSON.parse(JSON.stringify(body)) : null))));
-"""
-demo = json.loads(subprocess.check_output(["node", "-e", js], text=True))
-bad = 0
-for (m, p, b), r, d in zip(S, real, demo):
-    if r != d:
-        bad += 1
-        print("MISMATCH", m, p, json.dumps(b, ensure_ascii=False)[:80])
-        print("  real:", json.dumps(r, ensure_ascii=False)[:600])
-        print("  demo:", json.dumps(d, ensure_ascii=False)[:600])
-print(f"{len(S)} запросов, расхождений: {bad}")
-# print("ответы:", [(r["status"], r["data"].get("detail") if isinstance(r["data"], dict) else None) for r in real])
-# print("последний план:", json.dumps(real[-2]["data"], ensure_ascii=False)[:500])
+    js = f"""
+    const B = require({json.dumps(str(HERE / 'demo-backend.js'))});
+    const b = new B({{ today: "{TODAY}", cohortStart: "{COHORT}" }});
+    const S = {json.dumps(S, ensure_ascii=False)};
+    console.log(JSON.stringify(S.map(([m, p, body]) => b.handle(m, p, body ? JSON.parse(JSON.stringify(body)) : null))));
+    """
+    demo = json.loads(subprocess.check_output(["node", "-e", js], text=True))
+    bad = 0
+    # демо-бэкенд «Новой участницы» живёт до старта: экраны идущего цикла он не изображает
+    ACTIVE = ("/api/today", "/api/checkin", "/api/scorecard")
+    for (m, p, b), r, d in zip(S, real, demo):
+        if TODAY >= COHORT and p.startswith(ACTIVE):
+            continue
+        if r != d:
+            bad += 1
+            print("MISMATCH", m, p, json.dumps(b, ensure_ascii=False)[:80])
+            print("  real:", json.dumps(r, ensure_ascii=False)[:600])
+            print("  demo:", json.dumps(d, ensure_ascii=False)[:600])
+    print(f"{TODAY}: {len(S)} запросов, расхождений: {bad}")
+    total_bad += bad
+    # print("ответы:", [(r["status"], r["data"].get("detail") if isinstance(r["data"], dict) else None) for r in real])
+    # print("последний план:", json.dumps(real[-2]["data"], ensure_ascii=False)[:500])
+sys.exit(1 if total_bad else 0)

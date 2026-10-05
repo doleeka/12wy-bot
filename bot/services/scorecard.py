@@ -61,9 +61,10 @@ async def week_percent(session: AsyncSession, user: User, week: date) -> int | N
     """% за неделю или None, если чек-ин за эту неделю ещё не заполнен целиком."""
     done, marked = (
         await session.execute(
-            select(func.coalesce(func.sum(cast(Checkin.done, Integer)), 0), func.count(Checkin.id)).where(
-                Checkin.user_id == user.id, Checkin.week_start == week
-            )
+            select(func.coalesce(func.sum(cast(Checkin.done, Integer)), 0), func.count(Checkin.id))
+            .join(WeeklyTactic, WeeklyTactic.id == Checkin.tactic_id)
+            # убранное из плана действие (is_active=False) хранит свои отметки, но в процент не входит
+            .where(Checkin.user_id == user.id, Checkin.week_start == week, WeeklyTactic.is_active)
         )
     ).one()
     tactics = await session.scalars(

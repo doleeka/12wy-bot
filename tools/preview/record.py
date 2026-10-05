@@ -18,9 +18,13 @@ today = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else date(2026, 9, 
 out = {"today": today.isoformat(), "modes": {},
        "advice": {"good": texts.SCORE_ADVICE_EXCELLENT, "warning": texts.SCORE_ADVICE_GOOD, "critical": texts.SCORE_ADVICE_LOW}}
 
-for mode in ("before", "first", "mid", "w12"):
+# у режима «Старт, день 2» своя дата: вторник 06.10 — план ещё можно править (до 07.10)
+MODE_TODAY = {"day2": date(2026, 10, 6)}
+
+for mode in ("before", "first", "day2", "mid", "w12"):
     db = Path(tempfile.mkdtemp()) / "bot.db"; run_migrations(db)
-    start = {"mid": this_week - timedelta(days=14), "first": this_week, "w12": this_week - timedelta(weeks=11)}.get(mode, date(2026, 10, 5))
+    m_today = MODE_TODAY.get(mode, today); m_week = m_today - timedelta(days=m_today.weekday())
+    start = {"mid": m_week - timedelta(days=14), "first": m_week, "w12": m_week - timedelta(weeks=11)}.get(mode, date(2026, 10, 5))
     c = sqlite3.connect(db)
     c.executescript(f"""
     INSERT INTO users (id, telegram_id, first_name, onboarding_step, is_ready, send_report, cycle, cycle_start) VALUES (1, 1000001, 'Демо', 'DONE', 1, 'TEAM', 1, '{start}');
@@ -62,11 +66,12 @@ for mode in ("before", "first", "mid", "w12"):
                    "Спокойствие: сама выбираю, чем заниматься"))
     if mode != "before":  # во вторник и четверг урок уже отмечен, пробежки — все три
         for tid, wd in [(1, 1), (1, 3), (3, 0), (3, 2), (3, 4)]:
-            c.execute("INSERT INTO daily_marks (user_id, tactic_id, day) VALUES (1, ?, ?)", (tid, (this_week + timedelta(days=wd)).isoformat()))
+            if wd < m_today.weekday():  # только прошедшие дни недели
+                c.execute("INSERT INTO daily_marks (user_id, tactic_id, day) VALUES (1, ?, ?)", (tid, (m_week + timedelta(days=wd)).isoformat()))
     c.commit(); c.close()
     app = appmod.create_app(create_sessionmaker(create_engine(f"sqlite+aiosqlite:///{db}")),
                      Settings(bot_token=TOKEN, database_path=db, admin_ids=[]), None)
-    with patch.object(appmod, "local_today", lambda _s: today), TestClient(app) as cl:
+    with patch.object(appmod, "local_today", lambda _s: m_today), TestClient(app) as cl:
         h = {"Authorization": "tma " + sign_init_data({"id": 1000001, "first_name": "Демо"})}
         get = lambda p: (lambda r: (r.raise_for_status(), r.json())[1])(cl.get(p, headers=h))
         m = {k: get("/api/" + k) for k in ("me", "plan", "scorecard", "checkin", "today", "wheel", "intent", "vision")}

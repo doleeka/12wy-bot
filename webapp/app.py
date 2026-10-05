@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
-from bot.models import Checkin, EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
+from bot.models import Checkin, DailyMark, EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
 from bot.services import today as today_svc
 from bot.services import vision as vision_svc
@@ -200,16 +200,24 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             raise HTTPException(status_code=409, detail="wrong_step")
 
     def before_start(user: User) -> bool:
-        """Подтвердила план, но цикл ещё не начался — план можно менять."""
+        """Подтвердила план, но цикл ещё не начался."""
         return (
             user.onboarding_step == OnboardingStep.DONE
             and user.cycle_start is not None
             and local_today(settings) < user.cycle_start
         )
 
+    def plan_editable(user: User) -> bool:
+        """Подтверждённый план можно менять: до старта и в первые 3 дня цикла (единое правило для API и UI)."""
+        return cycle.plan_editable(user, local_today(settings))
+
     def require_plan_editable(user: User, *steps: OnboardingStep) -> None:
-        if user.onboarding_step not in steps and not before_start(user):
+        if user.onboarding_step not in steps and not plan_editable(user):
             raise HTTPException(status_code=409, detail="plan_locked")
+
+    def edit_until_iso(user: User) -> str | None:
+        until = cycle.plan_edit_until(user)
+        return until.isoformat() if until else None
 
     @app.get("/api/explore")
     async def get_explore(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
@@ -341,7 +349,10 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "cycle_start": start.isoformat(),
             "team": teams.team_name(team) if team else None,
             # план можно менять: во время онбординга и после подтверждения — пока цикл не начался
-            "editable": user.onboarding_step == OnboardingStep.TACTICS or before_start(user),
+            "editable": user.onboarding_step == OnboardingStep.TACTICS or plan_editable(user),
+            "editable_until": edit_until_iso(user),  # последний день правок, включительно
+            "started": user.cycle_start is not None and local_today(settings) >= user.cycle_start,
+            "reselect_allowed": user.onboarding_step == OnboardingStep.TACTICS or before_start(user),
         }
 
     async def own_priority(session: AsyncSession, user: User, priority_id: int) -> Priority:
@@ -399,8 +410,12 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
 
     @app.post("/api/plan/reselect")
     async def reselect_priorities(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
-        """Выбрать 3 приоритета заново из списка Explore. Тактики старых приоритетов удалятся при выборе."""
-        require_plan_editable(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
+        """Выбрать 3 приоритета заново из списка Explore. Тактики старых приоритетов удалятся при выборе.
+
+        Только до старта: после старта это стёрло бы отметки первых дней и вывело из «Сегодня»;
+        в первые 3 дня цели переименовываются, а действия правятся по одному."""
+        if user.onboarding_step not in (OnboardingStep.INTENT, OnboardingStep.TACTICS) and not before_start(user):
+            raise HTTPException(status_code=409, detail="plan_locked")
         user.onboarding_step = OnboardingStep.ELIMINATE
         return await explore_payload(session, user)
 
@@ -449,7 +464,12 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             )
             if left <= 1:
                 raise HTTPException(status_code=422, detail="last_tactic")
-        await session.delete(tactic)
+        checkins_n = await session.scalar(select(func.count(Checkin.id)).where(Checkin.tactic_id == tactic.id))
+        daily_n = await session.scalar(select(func.count(DailyMark.id)).where(DailyMark.tactic_id == tactic.id))
+        if checkins_n or daily_n:
+            tactic.is_active = False  # в первые дни цикла: убираем из плана, но отметки не теряем
+        else:
+            await session.delete(tactic)
         await session.flush()
         return await plan_payload(session, user)
 
@@ -563,7 +583,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "cycle_start": user.cycle_start.isoformat() if user.cycle_start else None,
             "priorities": len({t.priority_id for t in all_tactics}),
             "tactics": len(all_tactics),
-            "editable": before_start(user),
+            "editable": plan_editable(user),
+            "editable_until": edit_until_iso(user),
         }
         n = scorecard.week_number(user.cycle_start, today)
         if n is None:
@@ -703,8 +724,9 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         done_total = 0
         if user.cycle_start:
             done_total = await session.scalar(
-                select(func.count(Checkin.id)).where(
+                select(func.count(Checkin.id)).join(WeeklyTactic, WeeklyTactic.id == Checkin.tactic_id).where(
                     Checkin.user_id == user.id,
+                    WeeklyTactic.is_active,
                     Checkin.done,
                     Checkin.week_start >= user.cycle_start,
                     Checkin.week_start < user.cycle_start + timedelta(days=84),
