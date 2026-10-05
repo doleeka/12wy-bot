@@ -37,7 +37,13 @@ class WeekStats:
         return round(sum(self.percents) / len(self.percents)) if self.percents else None
 
     def bucket(self, level: str) -> int:
-        return sum(1 for p in self.percents if scorecard.level(p) == level)
+        """good / warning / critical; «critical» здесь — 1–69%: 0% считаем отдельно (zero)."""
+        return sum(1 for p in self.percents if p > 0 and scorecard.level(p) == level)
+
+    @property
+    def zero(self) -> int:
+        """Отметили неделю, но ни одно действие не получилось (0%)."""
+        return sum(1 for p in self.percents if p == 0)
 
 
 async def _week_state(session: AsyncSession, user: User, week: date) -> str:

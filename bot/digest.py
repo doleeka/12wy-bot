@@ -40,13 +40,14 @@ def digest_text(stats: WeekStats, settings: Settings | None, running: bool = Fal
         period=period(stats.week),
         checked=stats.checked,
         participants=stats.participants,
-        missing=texts.ADMIN_DIGEST_MISSING.format(n=stats.missing) if stats.missing else "",
+        missing=texts.ADMIN_DIGEST_MISSING.format(n=stats.missing),  # все счётчики — и нулевые тоже
         avg=f"{stats.average}%" if stats.average is not None else "—",
         good=stats.bucket("good"),
         warn=stats.bucket("warning"),
         low=stats.bucket("critical"),
+        zero=stats.zero,
         no_gaps=stats.no_gaps,
-        buffer=texts.ADMIN_DIGEST_BUFFER.format(n=stats.buffer) if stats.buffer else "",
+        buffer=texts.ADMIN_DIGEST_BUFFER.format(n=stats.buffer),
         teams=teams,
     )
     return text + (texts.ADMIN_DIGEST_RUNNING_NOTE if running else "")

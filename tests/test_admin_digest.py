@@ -41,6 +41,7 @@ async def community(sessionmaker):
     await mark(sessionmaker, 2, OCT5, [True, True, True, False])  # 75%
     await mark(sessionmaker, 3, OCT5, [True, True])               # отмечено не всё → не сделала
     await mark(sessionmaker, 4, OCT5, [True, True, False, False])  # 50%
+    await mark(sessionmaker, 6, OCT12, [False] * 4)               # поздняя F, её неделя 1 — 0%
 
 
 async def test_week_counts_without_names(sessionmaker):
@@ -55,6 +56,7 @@ async def test_week_counts_without_names(sessionmaker):
     text = digest_text(s, SETTINGS)
     assert "Итоги недели 1" in text and "5–11 октября" in text
     assert "3 из 4" in text and "не отметили: 1" in text and "75%" in text and "буфер" in text
+    assert "1–69%: 1" in text and "0%: 0" in text
     assert "Команда №1: 2 из 3" in text and "Команда №2: 1 из 1" in text
     assert not any(name in text for name in NAMES)  # ни одного имени
 
@@ -67,6 +69,7 @@ async def test_no_gaps_counts_only_full_streaks(sessionmaker):
     async with sessionmaker() as session:
         s = await week_stats(session, OCT12)
     assert s.checked == 3 and s.no_gaps == 2  # A и поздняя F; C — с пропуском
+    assert s.zero == 0  # F передумала: отметила заново на 100%
 
 
 async def test_monday_digest_goes_only_to_admins(sessionmaker, monkeypatch):
@@ -107,3 +110,24 @@ async def test_stats_command_admin_only(sessionmaker):
             router._parent_router = None
         dp.sub_routers.clear()
     assert User and Priority and WeeklyTactic  # импорт моделей для make_user
+
+
+async def test_zero_percent_counted_separately(sessionmaker):
+    await community(sessionmaker)
+    async with sessionmaker() as session:
+        s = await week_stats(session, OCT12)
+    # на неделе 12.10 у поздней F отмечено всё и всё «не получилось»
+    assert s.zero == 1 and s.bucket("critical") == 0 and 0 in s.percents
+    text = digest_text(s, SETTINGS)
+    assert "⚪ 0%: 1" in text and "Фариза" not in text
+    # группы складываются в число сделавших чек-ин
+    assert s.bucket("good") + s.bucket("warning") + s.bucket("critical") + s.zero == s.checked
+
+
+async def test_zero_counts_are_shown_too(sessionmaker):
+    await make_user(sessionmaker, 1, cycle_start=OCT5)
+    await mark(sessionmaker, 1, OCT5, [True] * 4)
+    async with sessionmaker() as session:
+        text = digest_text(await week_stats(session, OCT5), SETTINGS)
+    for line in ("не отметили: 0", "1–69%: 0", "⚪ 0%: 0", "70–84%: 0", "буфер (действий по плану нет): 0"):
+        assert line in text
