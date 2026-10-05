@@ -101,12 +101,14 @@ def tactic_keep() -> InlineKeyboardMarkup:
 #   ci:m:<tactic_id>:<week ordinal>:<1|0> | ci:done:<week ordinal> | ci:edit:<week ordinal>
 
 
-def checkin(tactics, week_ordinal: int) -> InlineKeyboardMarkup:  # noqa: ANN001
+def checkin(tactics, week_ordinal: int, webapp_url: str = "") -> InlineKeyboardMarkup:  # noqa: ANN001
     builder = InlineKeyboardBuilder()
+    if webapp_url:  # основной путь — приложение: там галочки за неделю уже подставлены
+        builder.row(InlineKeyboardButton(text="🌿 Отметить в приложении", web_app=WebAppInfo(url=webapp_url)))
     for n, tactic in enumerate(tactics, 1):
         builder.button(text=f"{n} ✅", callback_data=f"ci:m:{tactic.id}:{week_ordinal}:1")
         builder.button(text=f"{n} ❌", callback_data=f"ci:m:{tactic.id}:{week_ordinal}:0")
-    builder.adjust(4)
+    builder.adjust(*([1] if webapp_url else []), 4)
     builder.row(InlineKeyboardButton(text="Посчитать →", callback_data=f"ci:done:{week_ordinal}"))
     return builder.as_markup()
 

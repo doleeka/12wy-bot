@@ -33,7 +33,8 @@ async def send_weekly_checkins(bot: Bot, sessionmaker: async_sessionmaker, setti
     sent = 0
     async with sessionmaker() as session:
         for user in await checkins.users_for_checkin(session, week):
-            text, markup = await build_checkin(session, user, week)
+            text, markup = await build_checkin(session, user, week, settings.webapp_url)
+            await session.commit()  # отметки, подставленные из галочек приложения
             if markup is not None and await safe_send(bot, user.telegram_id, text, markup):
                 sent += 1
             await asyncio.sleep(SEND_DELAY)

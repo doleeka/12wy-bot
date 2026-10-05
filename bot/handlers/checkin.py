@@ -17,6 +17,7 @@ from bot.models import OnboardingStep, ReportTarget, User
 from bot.notify import display_name, safe_edit, safe_send
 from bot.team_notify import notify_team
 from bot.services import checkins, cycle, scorecard, teams
+from bot.services import today as today_svc
 from bot.services.users import get_or_create_user
 
 router = Router(name="checkin")
@@ -29,11 +30,21 @@ _MARK = {True: "✅", False: "❌", None: "▫️"}
 default_checkin_week = checkins.default_week  # общая логика с Mini App
 
 
-async def build_checkin(session: AsyncSession, user: User, week: date) -> tuple[str, InlineKeyboardMarkup | None]:
+async def build_checkin(
+    session: AsyncSession, user: User, week: date, webapp_url: str = ""
+) -> tuple[str, InlineKeyboardMarkup | None]:
     tactics = await checkins.tactics_for_week(session, user, week)
     if not tactics:
         return texts.CHECKIN_NO_TACTICS, None
     marks = await checkins.get_marks(session, user, week)
+    # Галочки из приложения: все дни действия отмечены → в чате сразу «сделано» (можно поменять).
+    # Подставляем только туда, где отметки ещё нет — ручной ответ (в т.ч. «❌») не перетираем.
+    daily = await today_svc.daily_marks(session, user, week)
+    prefilled = [t for t in tactics if t.id not in marks and today_svc.suggested_done(t, week, daily)]
+    for t in prefilled:
+        await checkins.set_mark(session, user, t.id, week, True)
+    if prefilled:
+        marks = await checkins.get_marks(session, user, week)
     period = f"{week:%d.%m}–{week + timedelta(days=6):%d.%m}"
     lines = [texts.CHECKIN_HEADER.format(n=checkins.checkin_week_number(user, week), period=period)]
     current_priority = None
@@ -42,7 +53,8 @@ async def build_checkin(session: AsyncSession, user: User, week: date) -> tuple[
             current_priority = tactic.priority_id
             lines.append(texts.CHECKIN_PRIORITY.format(title=escape(tactic.priority.title)))
         lines.append(texts.CHECKIN_TACTIC.format(n=n, text=escape(tactic.text), mark=_MARK[marks.get(tactic.id)]))
-    return "\n".join(lines) + texts.CHECKIN_FOOTER, keyboards.checkin(tactics, week.toordinal())
+    footer = (texts.CHECKIN_PREFILLED if prefilled else "") + texts.CHECKIN_FOOTER + (texts.CHECKIN_APP_HINT if webapp_url else "")
+    return "\n".join(lines) + footer, keyboards.checkin(tactics, week.toordinal(), webapp_url)
 
 
 def advice_for(value: int) -> str:
@@ -106,7 +118,7 @@ async def cmd_checkin(message: Message, session: AsyncSession, settings: Setting
             cycle.maybe_finish_cycle(user, today)
             await send_summary(message, session, user, today)
         return
-    text, markup = await build_checkin(session, user, week)
+    text, markup = await build_checkin(session, user, week, settings.webapp_url if settings else "")
     await message.answer(text, reply_markup=markup)
 
 
@@ -128,10 +140,10 @@ async def on_checkin_callback(
 
     if action == "m" and len(parts) == 5 and parts[2].isdigit() and parts[4] in ("0", "1"):
         if await checkins.set_mark(session, user, int(parts[2]), week, parts[4] == "1"):
-            text, markup = await build_checkin(session, user, week)
+            text, markup = await build_checkin(session, user, week, settings.webapp_url if settings else "")
             await safe_edit(callback.message, text, markup)
     elif action == "edit":
-        text, markup = await build_checkin(session, user, week)
+        text, markup = await build_checkin(session, user, week, settings.webapp_url if settings else "")
         await safe_edit(callback.message, text, markup)
     elif action == "done":
         tactics = await checkins.tactics_for_week(session, user, week)
