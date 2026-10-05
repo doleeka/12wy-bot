@@ -1429,7 +1429,7 @@
       });
       $("#today-open-plan").textContent = d.editable ? "Проверить и доработать план" : "Посмотреть план";
       $("#today-edit-hint").textContent = d.editable && d.editable_until
-        ? "Цели, «зачем» и действия можно менять до " + formatDate(d.editable_until) + " включительно — и в первые 3 дня цикла." : "";
+        ? "Цели, «зачем» и действия можно менять до " + formatDate(d.editable_until) + " включительно: до старта и в первые 3 дня цикла." : "";
       return;
     }
     if (d.status === "over") {
