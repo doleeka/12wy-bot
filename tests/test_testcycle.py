@@ -13,7 +13,9 @@ from bot.main import build_dispatcher
 import pytest
 
 THIS_WEEK = scorecard.week_start(date.today())
-OCT5 = date(2026, 10, 5)
+# Настоящий старт — всегда в будущем относительно дня прогона (раньше был зашит 05.10.2026 и тест
+# сломался в сам день старта: отметки текущей недели уже не «до старта»)
+OCT5 = THIS_WEEK + timedelta(days=7)
 
 
 @pytest.fixture
@@ -53,7 +55,7 @@ async def test_testcycle_on_checkin_off(sessionmaker, tg):
     assert (await user(sessionmaker)).cycle_start == THIS_WEEK - timedelta(days=14)
 
     await send(tg, "/testcycle off", ADMIN_ID, "private", ADMIN_ID)
-    assert "05.10" in tg[2].sent(ADMIN_ID)[-1] and "удалено: 4" in tg[2].sent(ADMIN_ID)[-1]
+    assert f"{OCT5:%d.%m}" in tg[2].sent(ADMIN_ID)[-1] and "удалено: 4" in tg[2].sent(ADMIN_ID)[-1]
     u = await user(sessionmaker)
     assert u.cycle_start == OCT5 and u.onboarding_step == OnboardingStep.DONE
     async with sessionmaker() as session:

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 import pytest
 
+import webapp.app as appmod
 from bot.models import OnboardingStep
 from bot.services import onboarding as svc
 from bot.services import tactics, teams, wheel
@@ -106,7 +107,16 @@ async def test_tactic_limit_and_ownership(api):  # noqa: F811
     assert (await api.delete(f"/api/tactics/{tid}", headers=h)).status_code == 404
 
 
-async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker):  # noqa: F811
+@pytest.fixture
+def not_monday(monkeypatch):
+    """«Сегодня» — не понедельник. План, подтверждённый в понедельник, стартует в тот же день и сразу
+    закрывается (так задумано), а этим тестам нужно время «до старта»."""
+    day = date.today() + timedelta(days=1 if date.today().weekday() == 0 else 0)
+    monkeypatch.setattr(appmod, "local_today", lambda _settings: day)
+    return day
+
+
+async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker, not_monday):  # noqa: F811
     pids = await to_tactics(api)
     h = auth()
     await api.post("/api/tactics", headers=h, json={"priority_id": pids[0], "text": "3 тренировки", "days": [0, 2, 4]})
@@ -120,7 +130,7 @@ async def test_confirm_plan_makes_ready_and_assigns_team(api, sessionmaker):  # 
     async with sessionmaker() as session:
         user = await teams.get_user_by_telegram_id(session, 42)
         assert user.is_ready and user.onboarding_step == OnboardingStep.DONE
-        assert user.cycle_start == svc.cycle_start_for(date.today())
+        assert user.cycle_start == svc.cycle_start_for(not_monday)
 
     # до старта цикла план можно менять; повторно подтверждать не нужно
     assert (await api.post("/api/plan/confirm", headers=h)).status_code == 409
@@ -150,7 +160,7 @@ async def confirmed(api, sessionmaker):  # noqa: F811
     return pids
 
 
-async def test_edit_goal_before_start(api, sessionmaker):  # noqa: F811
+async def test_edit_goal_before_start(api, sessionmaker, not_monday):  # noqa: F811
     pids = await confirmed(api, sessionmaker)
     h = auth()
     plan = (await api.put(f"/api/priorities/{pids[1]}", headers=h, json={"title": "Разговорный английский", "intent": WHY + "!"})).json()
@@ -165,7 +175,7 @@ async def test_edit_goal_before_start(api, sessionmaker):  # noqa: F811
     assert (await api.delete(f"/api/tactics/{tid}", headers=h)).json()["detail"] == "last_tactic"
 
 
-async def test_reselect_priorities_before_start(api, sessionmaker):  # noqa: F811
+async def test_reselect_priorities_before_start(api, sessionmaker, not_monday):  # noqa: F811
     await confirmed(api, sessionmaker)
     h = auth()
     data = (await api.post("/api/plan/reselect", headers=h)).json()
@@ -185,4 +195,4 @@ async def test_reselect_priorities_before_start(api, sessionmaker):  # noqa: F81
     assert plan["step"] == "done" and plan["team"] == "Команда №1"  # команда та же
     assert "остаётся прежней" in api.tg.sent(42)[-1]
     async with sessionmaker() as session:
-        assert (await teams.get_user_by_telegram_id(session, 42)).cycle_start == svc.cycle_start_for(date.today())
+        assert (await teams.get_user_by_telegram_id(session, 42)).cycle_start == svc.cycle_start_for(not_monday)

@@ -82,8 +82,8 @@ async def test_checkin_mark_overrides_daily_ticks(api, sessionmaker):  # noqa: F
 
 
 async def test_week_without_actions_is_buffer(api, sessionmaker):  # noqa: F811
-    # сейчас неделя 2, а все действия — в неделях 1 и 3
-    ids = await make(sessionmaker, [{"text": "Тест", "weeks": [1, 3]}], cycle_start=THIS_WEEK - timedelta(days=7))
+    # сейчас неделя 2, действия — в неделях 3 и 5 (неделя 1 тоже пустая: в понедельник чек-ин открывается за неё)
+    ids = await make(sessionmaker, [{"text": "Тест", "weeks": [3, 5]}], cycle_start=THIS_WEEK - timedelta(days=7))
     d = await today(api)
     assert d["status"] == "active" and d["week_number"] == 2
     assert d["today_items"] == [] and d["week_items"] == []
