@@ -17,7 +17,7 @@ from bot.commands import set_bot_commands, set_webapp_menu_button
 from bot.config import load_settings, local_today
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, checkin, cycle, fallback, group, onboarding, start, teams, wheel
+from bot.handlers import admin, broadcast, checkin, cycle, fallback, group, onboarding, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
@@ -42,6 +42,7 @@ def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
         group.router,
         start.router,
         admin.router,
+        broadcast.router,
         teams.router,
         checkin.router,
         cycle.router,
