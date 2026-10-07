@@ -102,7 +102,7 @@ async def test_midnight_in_almaty_not_utc(api, monkeypatch):
 
 @pytest.mark.parametrize("confirm_on, start, until", [
     (date(2026, 10, 5), "2026-10-05", "2026-10-07"),  # подтвердила в день старта — правки до 07.10
-    (date(2026, 10, 6), "2026-10-12", "2026-10-14"),  # позже — её неделя 1 с ближайшего понедельника
+    (date(2026, 10, 6), "2026-10-05", "2026-10-07"),  # позже — тот же общий старт и то же окно правок
 ])
 async def test_late_onboarding(api, confirm_on, start, until):
     api.today = confirm_on
@@ -144,11 +144,14 @@ async def test_deleting_action_with_marks_keeps_them(api, sessionmaker):
         assert await session.get(WeeklyTactic, fresh) is None
 
 
-async def test_other_participants_dates_unchanged(api, sessionmaker):
+async def test_everyone_starts_on_cohort_date(api, sessionmaker):
     api.today = date(2026, 10, 1)
     await confirmed(api, user_id=43)
-    api.today = date(2026, 10, 6)
-    await confirmed(api)  # поздняя — её старт 12.10
+    api.today = date(2026, 10, 9)
+    plan = await confirmed(api)  # подтвердила уже после окна правок — старт всё равно 05.10
+    assert plan["cycle_start"] == "2026-10-05" and plan["editable"] is False
+    t = (await api.get("/api/today", headers=auth())).json()
+    assert t["status"] == "active" and t["week_number"] == 1
     async with sessionmaker() as session:
         assert (await teams.get_user_by_telegram_id(session, 43)).cycle_start == OCT5
-        assert (await teams.get_user_by_telegram_id(session, 42)).cycle_start == date(2026, 10, 12)
+        assert (await teams.get_user_by_telegram_id(session, 42)).cycle_start == OCT5

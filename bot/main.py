@@ -65,6 +65,7 @@ async def main() -> None:
         logging.exception("restore.db не подошёл — работаю с текущей базой")
     await asyncio.to_thread(run_migrations, settings.database_path)
     engine = create_engine(settings.database_url)
+    moved = 0
     if settings.cycle_start:
         async with create_sessionmaker(engine)() as session:
             moved = await align_to_cohort_start(session, settings.cycle_start, local_today(settings))
@@ -95,7 +96,9 @@ async def main() -> None:
 
     logging.info("DB: %s", settings.database_path.resolve())
     for admin_id in settings.admin_ids:
-        await safe_send(bot, admin_id, texts.BOT_STARTED)
+        await safe_send(bot, admin_id, texts.BOT_STARTED + (
+            texts.BOT_STARTED_ALIGNED.format(n=moved, start=f"{settings.cycle_start:%d.%m}") if moved else ""
+        ))
     # Mini App (FastAPI) в том же процессе: общая база, тот же бот для уведомлений
     web = WebServer(
         uvicorn.Config(create_app(sessionmaker, settings, bot), host="0.0.0.0", port=settings.port, log_level="warning")

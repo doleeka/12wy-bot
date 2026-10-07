@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -187,8 +187,14 @@ async def add_tactic(session: AsyncSession, user: User, priority: Priority, text
     return tactic
 
 
+COHORT_WEEKS = 12
+
+
 def cycle_start_for(today: date, cohort_start: date | None = None) -> date:
-    """Неделя 1 — с ближайшего понедельника (сегодня, если понедельник), но не раньше общей даты старта."""
+    """Неделя 1 — общая дата старта сообщества. Если общий цикл уже идёт, присоединяемся к нему
+    (старт тот же — 05.10, а не следующий понедельник). Без общей даты — ближайший понедельник."""
+    if cohort_start and cohort_start <= today < cohort_start + timedelta(weeks=COHORT_WEEKS):
+        return cohort_start
     nearest = today + timedelta(days=(7 - today.weekday()) % 7)
     return max(nearest, cohort_start) if cohort_start else nearest
 
@@ -225,13 +231,24 @@ async def reset_onboarding(session: AsyncSession, user: User) -> None:
 
 
 async def align_to_cohort_start(session: AsyncSession, cohort_start: date, today: date) -> int:
-    """Переносит на общую дату старта тех, чей цикл назначен раньше и ещё не начался.
+    """Переносит на общую дату старта: у всех сообщество стартует в один день.
 
-    Например, участница прошла онбординг в сентябре и получила старт 28.09, а сообщество
-    стартует 5.10. Уже идущие циклы не трогаем. Возвращает, сколько участниц перенесено.
+    — назначен раньше общего старта и ещё не начался (онбординг в сентябре → 28.09 → 05.10);
+    — подтвердила план, когда цикл уже шёл, и получила следующий понедельник (12.10 → 05.10).
+    Уже идущие более ранние циклы (тест админа) не трогаем. Возвращает, сколько перенесено.
     """
+    end = cohort_start + timedelta(weeks=COHORT_WEEKS)
     users = await session.scalars(
-        select(User).where(User.cycle_start.is_not(None), User.cycle_start < cohort_start, User.cycle_start > today)
+        select(User).where(
+            User.cycle_start.is_not(None),
+            User.cycle_start != cohort_start,
+            or_(
+                # назначен раньше общего старта и ещё не начался
+                (User.cycle_start < cohort_start) & (User.cycle_start > today),
+                # подтвердила план, когда общий цикл уже шёл, и получила следующий понедельник
+                (User.cycle_start > cohort_start) & (User.cycle_start < end),
+            ),
+        )
     )
     moved = 0
     for user in users:
