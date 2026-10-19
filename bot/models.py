@@ -83,6 +83,9 @@ class User(Base):
     test_mode_since: Mapped[datetime | None] = mapped_column(DateTime)
     # Организатор вне команд: не распределяется ни в одну тройку (/noteam)
     no_team: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Исключён админом из сообщества (/remove): ничего не получает, не считается, приложение закрыто.
+    # Данные не удаляются — /restore возвращает
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")

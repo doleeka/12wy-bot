@@ -117,7 +117,10 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def current_user(
         tg: WebAppInitData = Depends(telegram_user), session: AsyncSession = Depends(db)
     ) -> User:
-        return await get_or_create_user(session, tg.user)
+        user = await get_or_create_user(session, tg.user)
+        if user.excluded_at is not None and user.telegram_id not in settings.admin_ids:
+            raise HTTPException(status_code=403, detail="excluded")  # исключена из сообщества (/remove)
+        return user
 
     # ---------- профиль ----------
 

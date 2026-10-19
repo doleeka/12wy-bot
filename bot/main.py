@@ -17,8 +17,8 @@ from bot.commands import set_bot_commands, set_webapp_menu_button
 from bot.config import load_settings, local_today
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, broadcast, checkin, cycle, fallback, group, onboarding, start, teams, wheel
-from bot.middlewares import DbSessionMiddleware
+from bot.handlers import admin, broadcast, checkin, members, cycle, fallback, group, onboarding, start, teams, wheel
+from bot.middlewares import DbSessionMiddleware, ExcludedMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
@@ -37,12 +37,14 @@ class WebServer(uvicorn.Server):
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
+    dp.update.middleware(ExcludedMiddleware())  # исключённые из сообщества — только «доступ закрыт»
     # group — только групповые чаты; остальные роутеры — только личка (фильтр задан в каждом модуле)
     dp.include_routers(
         group.router,
         start.router,
         admin.router,
         broadcast.router,
+        members.router,
         teams.router,
         checkin.router,
         cycle.router,

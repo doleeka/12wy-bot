@@ -25,8 +25,10 @@ _pending: dict[str, tuple[int, str]] = {}
 
 
 async def recipients(session: AsyncSession, sender_tg_id: int) -> list[int]:
-    """Все, кто запускал бота, кроме самой отправительницы."""
-    rows = await session.scalars(select(User.telegram_id).where(User.telegram_id != sender_tg_id).order_by(User.id))
+    """Все, кто запускал бота, кроме самой отправительницы и исключённых из сообщества."""
+    rows = await session.scalars(
+        select(User.telegram_id).where(User.telegram_id != sender_tg_id, User.excluded_at.is_(None)).order_by(User.id)
+    )
     return list(rows)
 
 

@@ -92,7 +92,9 @@ def summarize(tactics: list[WeeklyTactic], marks: dict[int, bool]) -> tuple[int,
 
 async def users_for_checkin(session: AsyncSession, week: date) -> list[User]:
     """Готовые участницы, у которых неделя week входит в цикл и отчёт за неё ещё не отправлен."""
-    rows = await session.scalars(select(User).where(User.onboarding_step == OnboardingStep.DONE).order_by(User.id))
+    rows = await session.scalars(
+        select(User).where(User.onboarding_step == OnboardingStep.DONE, User.excluded_at.is_(None)).order_by(User.id)
+    )
     return [
         u
         for u in rows

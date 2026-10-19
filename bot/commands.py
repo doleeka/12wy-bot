@@ -28,6 +28,8 @@ PARTICIPANT_COMMANDS = [
     BotCommand(command="help", description="Что умеет бот"),
 ]
 ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
+    BotCommand(command="remove", description="Админ: исключить из сообщества (тихо, обратимо)"),
+    BotCommand(command="restore", description="Админ: вернуть исключённых / список"),
     BotCommand(command="broadcast", description="Админ: сообщение всем (с предпросмотром)"),
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),
     BotCommand(command="teams", description="Админ: все команды"),
