@@ -1,0 +1,9 @@
+aiogram>=3.13,<4
+SQLAlchemy[asyncio]>=2.0,<2.2
+aiosqlite>=0.20
+python-dotenv>=1.0
+APScheduler>=3.10,<4
+alembic>=1.13,<2
+tzdata>=2024.1
+fastapi>=0.110
+uvicorn>=0.29

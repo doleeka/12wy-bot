@@ -1,0 +1,258 @@
+"""Онбординг после колеса: Explore → Eliminate → Essential intent → Тактики."""
+from __future__ import annotations
+
+import re
+from datetime import date, timedelta
+
+from sqlalchemy import delete, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from bot.models import EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic
+
+PRIORITIES_COUNT = 3
+MIN_EXPLORE_ITEMS = PRIORITIES_COUNT
+MAX_EXPLORE_ITEMS = 40
+MAX_ITEM_LEN = 200
+MIN_INTENT_LEN = 15
+MAX_TACTICS_PER_PRIORITY = 2
+
+_BULLET_RE = re.compile(r"^\s*(?:[-–—•*·]+|\d+[.)])\s*")
+_MEASURABLE_RE = re.compile(
+    r"\d|раз|кажд|ежедн|ежеднев|минут|час|страниц|шаг|км|километр|тренировк|сесси|урок",
+    re.IGNORECASE,
+)
+
+
+# ---------- Explore ----------
+
+def parse_explore_text(text: str) -> list[str]:
+    """Каждая непустая строка — отдельный пункт; маркеры списка убираем."""
+    items = []
+    for line in text.splitlines():
+        line = _BULLET_RE.sub("", line).strip()
+        if line:
+            items.append(line[:MAX_ITEM_LEN])
+    return items
+
+
+async def get_explore_items(session: AsyncSession, user: User) -> list[ExploreItem]:
+    rows = await session.scalars(
+        select(ExploreItem)
+        .where(ExploreItem.user_id == user.id, ExploreItem.cycle == user.cycle)
+        .order_by(ExploreItem.id)
+    )
+    return list(rows)
+
+
+async def add_explore_items(session: AsyncSession, user: User, texts: list[str]) -> int:
+    """Добавляет пункты (без дублей и не больше лимита). Возвращает, сколько добавлено."""
+    existing = await get_explore_items(session, user)
+    seen = {item.text.casefold() for item in existing}
+    added = 0
+    for text in texts:
+        if len(existing) + added >= MAX_EXPLORE_ITEMS:
+            break
+        if text.casefold() in seen:
+            continue
+        seen.add(text.casefold())
+        session.add(ExploreItem(user_id=user.id, cycle=user.cycle, text=text))
+        added += 1
+    await session.flush()
+    return added
+
+
+async def delete_explore_item(session: AsyncSession, user: User, item_id: int) -> bool:
+    result = await session.execute(
+        delete(ExploreItem).where(
+            ExploreItem.id == item_id, ExploreItem.user_id == user.id, ExploreItem.cycle == user.cycle
+        )
+    )
+    return result.rowcount > 0
+
+
+# ---------- Eliminate ----------
+
+class TooManySelected(Exception):
+    pass
+
+
+async def toggle_selection(session: AsyncSession, user: User, item_id: int) -> ExploreItem | None:
+    items = await get_explore_items(session, user)
+    item = next((i for i in items if i.id == item_id), None)
+    if item is None:
+        return None
+    if not item.selected and sum(i.selected for i in items) >= PRIORITIES_COUNT:
+        raise TooManySelected
+    item.selected = not item.selected
+    await session.flush()
+    return item
+
+
+async def set_selection(session: AsyncSession, user: User, item_ids: list[int]) -> None:
+    """Отмечает ровно эти пункты (для Mini App, где выбор отправляется целиком)."""
+    items = await get_explore_items(session, user)
+    wanted = set(item_ids)
+    if len(wanted) != PRIORITIES_COUNT or not wanted <= {i.id for i in items}:
+        raise ValueError(f"Нужно выбрать ровно {PRIORITIES_COUNT} своих пункта")
+    for item in items:
+        item.selected = item.id in wanted
+    await session.flush()
+
+
+async def confirm_priorities(session: AsyncSession, user: User) -> list[Priority]:
+    """Превращает ровно 3 отмеченных пункта в приоритеты и переводит на шаг Intent."""
+    selected = [i for i in await get_explore_items(session, user) if i.selected]
+    if len(selected) != PRIORITIES_COUNT:
+        raise ValueError(f"Нужно выбрать ровно {PRIORITIES_COUNT}, выбрано {len(selected)}")
+    await session.execute(delete(Priority).where(Priority.user_id == user.id, Priority.cycle == user.cycle))
+    priorities = [
+        Priority(user_id=user.id, cycle=user.cycle, position=pos, title=item.text, explore_item_id=item.id)
+        for pos, item in enumerate(selected, start=1)
+    ]
+    session.add_all(priorities)
+    user.onboarding_step = OnboardingStep.INTENT
+    await session.flush()
+    return priorities
+
+
+# ---------- Priorities / Intent / Tactics ----------
+
+async def get_priorities(session: AsyncSession, user: User) -> list[Priority]:
+    rows = await session.scalars(
+        select(Priority)
+        .where(Priority.user_id == user.id, Priority.cycle == user.cycle)
+        .options(selectinload(Priority.intent), selectinload(Priority.tactics))
+        .order_by(Priority.position)
+        .execution_options(populate_existing=True)
+    )
+    return list(rows)
+
+
+def next_priority_without_intent(priorities: list[Priority]) -> Priority | None:
+    return next((p for p in priorities if p.intent is None), None)
+
+
+async def save_intent(session: AsyncSession, user: User, text: str) -> Priority | None:
+    """Сохраняет «зачем» для первого приоритета без него. Возвращает этот приоритет."""
+    priorities = await get_priorities(session, user)
+    priority = next_priority_without_intent(priorities)
+    if priority is None:
+        return None
+    session.add(EssentialIntent(priority_id=priority.id, text=text.strip()))
+    await session.flush()
+    await session.refresh(priority, ["intent"])
+    if next_priority_without_intent(priorities) is None:
+        user.onboarding_step = OnboardingStep.TACTICS
+        user.onboarding_position = 1
+    return priority
+
+
+async def set_intents(session: AsyncSession, user: User, intents: dict[int, str]) -> list[Priority]:
+    """Сохраняет «зачем» сразу для всех 3 приоритетов (Mini App) и переводит на шаг тактик."""
+    priorities = await get_priorities(session, user)
+    texts = {pid: text.strip() for pid, text in intents.items()}
+    if set(texts) != {p.id for p in priorities} or any(len(t) < MIN_INTENT_LEN for t in texts.values()):
+        raise ValueError("Нужно «зачем» для каждого приоритета")
+    for priority in priorities:
+        if priority.intent is None:
+            session.add(EssentialIntent(priority_id=priority.id, text=texts[priority.id]))
+        else:
+            priority.intent.text = texts[priority.id]
+    if user.onboarding_step == OnboardingStep.INTENT:
+        user.onboarding_step = OnboardingStep.TACTICS
+        user.onboarding_position = 1
+    await session.flush()
+    return await get_priorities(session, user)
+
+
+def is_measurable(text: str) -> bool:
+    return bool(_MEASURABLE_RE.search(text))
+
+
+async def current_tactic_priority(session: AsyncSession, user: User) -> Priority | None:
+    if user.onboarding_step != OnboardingStep.TACTICS or user.onboarding_position is None:
+        return None
+    priorities = await get_priorities(session, user)
+    return next((p for p in priorities if p.position == user.onboarding_position), None)
+
+
+async def add_tactic(session: AsyncSession, user: User, priority: Priority, text: str) -> WeeklyTactic:
+    if len(priority.tactics) >= MAX_TACTICS_PER_PRIORITY:
+        raise ValueError("У приоритета уже максимум тактик")
+    tactic = WeeklyTactic(priority_id=priority.id, user_id=user.id, text=text.strip()[:MAX_ITEM_LEN])
+    session.add(tactic)
+    await session.flush()
+    await session.refresh(priority, ["tactics"])
+    return tactic
+
+
+COHORT_WEEKS = 12
+
+
+def cycle_start_for(today: date, cohort_start: date | None = None) -> date:
+    """Неделя 1 — общая дата старта сообщества. Если общий цикл уже идёт, присоединяемся к нему
+    (старт тот же — 05.10, а не следующий понедельник). Без общей даты — ближайший понедельник."""
+    if cohort_start and cohort_start <= today < cohort_start + timedelta(weeks=COHORT_WEEKS):
+        return cohort_start
+    nearest = today + timedelta(days=(7 - today.weekday()) % 7)
+    return max(nearest, cohort_start) if cohort_start else nearest
+
+
+def advance_tactics(user: User, today: date, cohort_start: date | None = None) -> bool:
+    """Переходит к следующему приоритету. True — онбординг завершён."""
+    position = (user.onboarding_position or 0) + 1
+    if position > PRIORITIES_COUNT:
+        user.onboarding_position = None
+        user.onboarding_step = OnboardingStep.DONE
+        user.is_ready = True
+        user.cycle_start = cycle_start_for(today, cohort_start)
+        return True
+    user.onboarding_position = position
+    return False
+
+
+
+async def reset_onboarding(session: AsyncSession, user: User) -> None:
+    """Стирает онбординг текущего цикла (колесо, Explore, приоритеты с «зачем», тактиками и чек-инами).
+
+    Для тестов админом: пройти онбординг заново своими глазами. Команда сохраняется.
+    Каскад по внешним ключам удаляет «зачем», тактики и чек-ины вместе с приоритетами.
+    """
+    from bot.models import WheelOfBalance  # noqa: PLC0415 — нужен только здесь
+
+    for model in (Priority, ExploreItem, WheelOfBalance):
+        await session.execute(delete(model).where(model.user_id == user.id, model.cycle == user.cycle))
+    user.onboarding_step = OnboardingStep.WHEEL
+    user.onboarding_position = None
+    user.cycle_start = None
+    user.last_reported_week = None
+    await session.flush()
+
+
+async def align_to_cohort_start(session: AsyncSession, cohort_start: date, today: date) -> int:
+    """Переносит на общую дату старта: у всех сообщество стартует в один день.
+
+    — назначен раньше общего старта и ещё не начался (онбординг в сентябре → 28.09 → 05.10);
+    — подтвердила план, когда цикл уже шёл, и получила следующий понедельник (12.10 → 05.10).
+    Уже идущие более ранние циклы (тест админа) не трогаем. Возвращает, сколько перенесено.
+    """
+    end = cohort_start + timedelta(weeks=COHORT_WEEKS)
+    users = await session.scalars(
+        select(User).where(
+            User.cycle_start.is_not(None),
+            User.cycle_start != cohort_start,
+            or_(
+                # назначен раньше общего старта и ещё не начался
+                (User.cycle_start < cohort_start) & (User.cycle_start > today),
+                # подтвердила план, когда общий цикл уже шёл, и получила следующий понедельник
+                (User.cycle_start > cohort_start) & (User.cycle_start < end),
+            ),
+        )
+    )
+    moved = 0
+    for user in users:
+        user.cycle_start = cohort_start
+        moved += 1
+    await session.flush()
+    return moved

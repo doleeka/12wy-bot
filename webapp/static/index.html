@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>12 недель</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main id="app">
+    <!-- Прогресс онбординга: «Шаг X из 6» — только на шагах первоначального плана -->
+    <header class="ob" id="ob-progress" hidden>
+      <div class="ob-top"><span id="ob-step"></span><span class="ob-method" id="ob-method"></span></div>
+      <div class="ob-bar" role="progressbar" aria-valuemin="1" aria-valuemax="6" id="ob-bar"><i id="ob-fill"></i></div>
+    </header>
+    <!-- Загрузка -->
+    <section class="screen" id="screen-loading">
+      <p class="muted center">Загружаю…</p>
+    </section>
+
+    <!-- Открыто не из Telegram / ошибка -->
+    <section class="screen" id="screen-error" hidden>
+      <h1>Откройте через Telegram</h1>
+      <p class="muted" id="error-text">Это приложение работает внутри Telegram. Откройте бота и нажмите «Открыть приложение».</p>
+    </section>
+
+    <!-- Приветствие -->
+    <section class="screen" id="screen-welcome" hidden>
+      <p class="eyebrow">Привет, <span data-name></span> 🌿</p>
+      <h1>Собери свой план на 12 недель</h1>
+      <p>За 5–7 минут определим 3 главных приоритета и превратим их в конкретные действия.</p>
+      <ol class="steps">
+        <li><b>Оценишь, что происходит сейчас</b></li>
+        <li><b>Выберешь 3 главных направления</b></li>
+        <li><b>Составишь действия на ближайшие 12 недель</b></li>
+      </ol>
+      <p class="muted">Ничего не нужно формулировать идеально — план можно изменить позже.</p>
+      <details class="card more">
+        <summary>Почему только 3 приоритета?</summary>
+        <p>12 недель легко забить десятком целей — и выгореть к шестой. Когда главного мало, на него хватает сил: <i>меньше, но лучше</i>. Остальное никуда не денется — мы сохраним его в «Не сейчас».</p>
+        <p class="muted small">Метод: The 12 Week Year + Essentialism.</p>
+      </details>
+    </section>
+
+    <!-- Колесо баланса -->
+    <section class="screen" id="screen-wheel" hidden>
+      <h1>Как ты сейчас?</h1>
+      <p class="muted">Оцени каждую сферу от 1 до 10. Первая цифра обычно самая честная.</p>
+
+      <figure class="chart" aria-label="Колесо баланса">
+        <svg id="radar" role="img"></svg>
+        <div class="tooltip" id="radar-tip" hidden></div>
+        <figcaption class="legend" id="radar-legend" hidden>
+          <span><i class="swatch now"></i>сейчас</span>
+          <span><i class="swatch before"></i>12 недель назад</span>
+        </figcaption>
+      </figure>
+
+      <div id="sphere-list" class="spheres"></div>
+
+      <div class="extras">
+        <button class="add-sphere" id="toggle-extras" type="button">+ Добавить сферу <span class="muted small">— по желанию</span></button>
+        <div id="extra-chips" class="chips" hidden></div>
+      </div>
+    </section>
+
+    <!-- Итог колеса -->
+    <section class="screen" id="screen-wheel-done" hidden>
+      <h1>Твоё колесо</h1>
+      <figure class="chart">
+        <svg id="radar-done" role="img"></svg>
+        <figcaption class="legend" id="radar-done-legend" hidden>
+          <span><i class="swatch now"></i>сейчас</span>
+          <span><i class="swatch before"></i>12 недель назад</span>
+        </figcaption>
+      </figure>
+      <div class="extremes">
+        <div class="card"><span class="muted small" id="wheel-low-label">Самая низкая оценка сейчас</span><b id="wheel-low"></b></div>
+        <div class="card" id="wheel-high-card"><span class="muted small" id="wheel-high-label">Самая высокая</span><b id="wheel-high"></b></div>
+      </div>
+      <div id="comparison" class="card" hidden></div>
+      <p class="muted">Это не диагноз и не рейтинг жизни. Колесо помогает заметить, куда сейчас уходит меньше внимания.</p>
+      <button class="link" id="edit-wheel">Изменить оценки</button>
+    </section>
+
+    <!-- Видение на 3+ года: необязательно, не входит в 6 шагов. После колеса и во вкладке «План» -->
+    <section class="screen" id="screen-vision" hidden>
+      <p class="eyebrow" id="vision-eyebrow">Необязательно · 2–3 минуты</p>
+      <h1>Куда ты идёшь?</h1>
+      <p class="muted">Представь свою жизнь через 3 года. Не составляй идеальный план — просто опиши, какой хочешь её видеть. Хватит 1–2 предложений, заполнить можно не всё.</p>
+      <div class="vision-form">
+        <div class="intent"><label for="vision-work">💼 Работа и деньги</label>
+          <textarea id="vision-work" data-field="work" maxlength="1000" placeholder="Например: работаю удалённо на себя, доход стабильный и не зависит от одного клиента"></textarea></div>
+        <div class="intent"><label for="vision-life">❤️ Жизнь и отношения</label>
+          <textarea id="vision-life" data-field="life" maxlength="1000" placeholder="Например: живём рядом с родителями, вечера — с семьёй, а не в телефоне"></textarea></div>
+        <div class="intent"><label for="vision-me">🌱 Ты сама — здоровье, навыки, образ жизни</label>
+          <textarea id="vision-me" data-field="me" maxlength="1000" placeholder="Например: бегаю, свободно говорю по-английски, высыпаюсь"></textarea></div>
+        <div class="intent"><label for="vision-main">✨ Что изменилось главное?</label>
+          <textarea id="vision-main" data-field="main" maxlength="1000" placeholder="Например: я спокойнее и сама выбираю, чем заниматься"></textarea></div>
+      </div>
+      <div class="card note-card">Не нужно достичь всего за 12 недель — выбери ближайший шаг.<span id="vision-next"> Дальше выберем 3 вещи, которые приблизят тебя к этой жизни.</span></div>
+      <div id="vision-reflection" hidden>
+        <h2>12 недель позади: оглянись</h2>
+        <p class="muted small">По желанию — на проценты недель не влияет.</p>
+        <div class="intent"><label for="refl-closer">Ты стала ближе к своему видению?</label><textarea id="refl-closer" data-refl="closer" maxlength="1000"></textarea></div>
+        <div class="intent"><label for="refl-changed">Что изменилось?</label><textarea id="refl-changed" data-refl="changed" maxlength="1000"></textarea></div>
+        <div class="intent"><label for="refl-next">Что берём в следующие 12 недель?</label><textarea id="refl-next" data-refl="next" maxlength="1000"></textarea></div>
+      </div>
+      <p class="muted small" id="vision-draft-note" hidden>Есть несохранённый текст — он остался с прошлого раза.</p>
+      <button class="link" id="vision-later">Сделаю позже</button>
+    </section>
+
+    <!-- Explore -->
+    <section class="screen" id="screen-explore" hidden>
+      <h1>Что для тебя важно прямо сейчас?</h1>
+      <p class="muted">Напиши всё, что хочешь изменить, закончить, попробовать или получить. Без ограничений — выбирать будем на следующем шаге.</p>
+      <div class="chips quick" id="explore-quick" aria-label="Быстрые темы"></div>
+      <form class="add-row" id="explore-form" autocomplete="off">
+        <textarea id="explore-input" rows="1" maxlength="1000" aria-label="Новый пункт"></textarea>
+        <button type="submit" class="add-btn" aria-label="Добавить">＋</button>
+      </form>
+      <p class="muted small">Каждый пункт — с новой строки. Нажми на пункт, чтобы исправить.</p>
+      <div class="card" id="explore-hints" hidden></div>
+      <ul class="items" id="explore-list"></ul>
+      <button class="link" id="show-wheel">Посмотреть моё колесо</button>
+    </section>
+
+    <!-- Eliminate -->
+    <section class="screen" id="screen-eliminate" hidden>
+      <h1>Выбери 3 главных</h1>
+      <p class="muted">Выбери 3 вещи, которым готова уделять время следующие 12 недель.</p>
+      <div class="card soft">Остальное мы сохраним в «Не сейчас» — ты ничего не теряешь.</div>
+      <div class="checks" id="eliminate-list"></div>
+      <button class="link" id="back-to-explore">← Дописать в список</button>
+    </section>
+
+    <!-- Essential intent -->
+    <section class="screen" id="screen-intent" hidden>
+      <h1>Зачем тебе это?</h1>
+      <p class="muted">Для каждого приоритета — почему он важен. Когда на 5-й неделе станет тяжело, этот ответ удержит.</p>
+      <div class="card soft example"><span class="muted small">Пример</span>«Хочу создать стабильный источник дохода, чтобы через год меньше зависеть от основной работы.»</div>
+      <p class="muted small">Не ищи красивую формулировку. Напиши честно.</p>
+      <div id="intent-list"></div>
+      <details class="card more" id="not-now" hidden><summary>Осознанное «не сейчас»</summary><ul></ul>
+        <p class="muted small">Эти пункты сохранены — к ним можно вернуться в следующем цикле.</p></details>
+    </section>
+
+    <!-- Тактики -->
+    <section class="screen" id="screen-tactics" hidden>
+      <h1>Что ты будешь делать?</h1>
+      <p class="muted">Для каждого приоритета — конкретные действия. По ним в конце недели можно честно ответить «да» или «нет».</p>
+      <div class="card soft example"><span>❌ «Больше заботиться о здоровье»</span><span>✅ «3 тренировки по 30 минут — пн, ср, пт»</span></div>
+      <div id="tactic-groups"></div>
+    </section>
+
+    <!-- Мастер действия: что сделаешь → как часто → когда -->
+    <section class="screen" id="screen-tactic-edit" hidden>
+      <p class="eyebrow" id="edit-priority"></p>
+      <ol class="mini-steps" id="wz-steps" aria-label="Шаги">
+        <li data-i="1">Действие</li><li data-i="2">Как часто</li><li data-i="3">Когда</li>
+      </ol>
+
+      <div class="wz" id="wz-1">
+        <h1>Что ты реально сделаешь?</h1>
+        <p class="muted">Одно конкретное действие, которое можно отметить «сделано» или «нет».</p>
+        <div class="card soft example"><span>❌ «Подготовиться к CFA»</span><span>✅ «Решить 3 блока CFA по 45 минут»</span></div>
+        <div class="chips quick" id="tactic-templates" aria-label="Шаблоны"></div>
+        <textarea id="tactic-text" class="field" rows="2" maxlength="200" aria-label="Действие"></textarea>
+        <p class="hint-line" id="measurable-hint"></p>
+        <button class="link danger" id="delete-tactic" hidden>Удалить действие</button>
+      </div>
+
+      <div class="wz" id="wz-2" hidden>
+        <h1>Как часто?</h1>
+        <p class="muted" id="wz-text"></p>
+        <div class="options" role="radiogroup" id="schedule-mode">
+          <button type="button" class="option" data-mode="every" role="radio"><b>Каждую неделю</b><span>Регулярное действие — например, тренировки или уроки</span></button>
+          <button type="button" class="option" data-mode="one" role="radio"><b>В конкретную неделю</b><span>Разовое — например, сдать тест или запустить сайт</span></button>
+          <button type="button" class="option" data-mode="some" role="radio"><b>Несколько недель</b><span>Контрольные точки — например, недели 4, 8 и 12</span></button>
+        </div>
+      </div>
+
+      <div class="wz" id="wz-3" hidden>
+        <h1 id="wz3-title">Когда?</h1>
+        <p class="muted" id="wz3-text"></p>
+        <div class="day-grid" id="day-grid" role="group" aria-label="Дни недели"></div>
+        <div class="week-grid" id="week-grid" hidden></div>
+        <p class="muted small" id="weeks-summary"></p>
+      </div>
+    </section>
+
+    <!-- Цель и «зачем» -->
+    <section class="screen" id="screen-priority-edit" hidden>
+      <p class="eyebrow" id="prio-eyebrow"></p>
+      <h1>Цель и «зачем»</h1>
+      <label class="field-label" for="prio-title">Цель</label>
+      <textarea id="prio-title" class="field" rows="2" maxlength="200"></textarea>
+      <label class="field-label" for="prio-intent">Зачем это тебе?</label>
+      <textarea id="prio-intent" class="field" rows="4" maxlength="2000"></textarea>
+      <div id="prio-replace-box" hidden><label><input type="checkbox" id="prio-replace"> Заменить приоритет на новый</label>
+        <p>Прежняя цель и её действия останутся в истории. При замене создадим новый набор действий.</p></div>
+      <div id="prio-replacement-fields" hidden><label class="field-label" for="prio-first-action">Первое действие нового приоритета — один раз за неделю</label>
+        <textarea id="prio-first-action" class="field" maxlength="200" rows="2"></textarea>
+        <p>Расписание и дополнительные действия можно настроить после сохранения.</p></div>
+      <p class="hint-line" id="prio-hint"></p>
+    </section>
+
+    <!-- Итог плана -->
+    <section class="screen" id="screen-plan" hidden>
+      <p class="eyebrow" id="plan-eyebrow">Итог</p>
+      <h1 id="plan-title">Твой план на 12 недель</h1>
+      <p class="muted" id="plan-start"></p>
+      <!-- во вкладке «План»: Видение | 12 недель (по умолчанию — 12 недель) -->
+      <div class="segmented" id="plan-switch" role="tablist" aria-label="Раздел плана" hidden>
+        <button type="button" role="tab" data-view="vision" id="plan-tab-vision">Видение</button>
+        <button type="button" role="tab" data-view="weeks" id="plan-tab-weeks">12 недель</button>
+      </div>
+      <div id="plan-vision" role="tabpanel" hidden>
+        <div class="card accent" id="vision-reflect-card" hidden>
+          <b>Неделя 12: ты стала ближе к своему видению?</b>
+          <p class="muted" id="vision-reflect-text"></p>
+          <button class="btn" id="vision-reflect">Ответить</button>
+        </div>
+        <div class="card empty-card" id="vision-empty" hidden>
+          <b>Видение ещё не заполнено</b>
+          <p class="muted">Какой ты хочешь видеть свою жизнь через 3 года? Четыре коротких блока, можно заполнить не всё — и поправить в любой момент.</p>
+          <button class="btn" id="vision-fill">Заполнить видение</button>
+        </div>
+        <div id="vision-view" hidden>
+          <div class="card vision-card" id="vision-blocks"></div>
+          <p class="muted small">Не нужно достичь всего за 12 недель — выбери ближайший шаг. Видение видишь только ты.</p>
+          <button class="btn secondary" id="vision-edit">Изменить видение</button>
+        </div>
+      </div>
+      <div id="plan-weeks-view">
+      <div class="card accent" id="plan-edit-box" hidden>
+        <b id="plan-edit-title">План можно менять</b>
+        <p class="muted" id="plan-edit-text"></p>
+        <button class="btn" id="plan-edit">Изменить цели и действия</button>
+        <button class="link" id="plan-reselect">↺ Выбрать 3 приоритета заново</button>
+      </div>
+      <div id="plan-priorities"></div>
+      <div class="card warn" id="plan-overload" hidden></div>
+      <h2>По неделям</h2>
+      <div id="plan-every"></div>
+      <div class="weeks" id="plan-weeks"></div>
+      <details class="card more overview">
+        <summary>Обзор нагрузки</summary>
+        <p class="muted small grid-hint" id="plan-grid-hint" hidden>Названия закреплены слева — недели листай вбок →</p>
+        <div class="plan-grid" id="plan-grid" tabindex="0" role="region" aria-label="Обзор нагрузки по неделям, листается вбок"></div>
+        <p class="muted small" id="plan-buffer"></p>
+      </details>
+      <button class="link" id="edit-plan" hidden>← Изменить действия</button>
+      </div>
+    </section>
+
+    <!-- Готова -->
+    <section class="screen" id="screen-ready" hidden>
+      <div class="ready">
+        <div class="ready-emoji">🎉</div>
+        <h1>Ты готова!</h1>
+        <p id="ready-start"></p>
+        <p id="ready-team"></p>
+        <p class="muted">Каждую неделю я буду присылать действия этой недели для чек-ина. Ориентиры: 85%+ — по плану, 70–84% — почти по плану, ниже 70% — стоит пересмотреть план. Не 100% — и это нормально.</p>
+      </div>
+    </section>
+
+    <!-- Вкладка «Сегодня»: что мне делать сейчас? -->
+    <section class="screen tab-screen" id="screen-today" hidden>
+      <p class="eyebrow" id="today-eyebrow"></p>
+      <h1 id="today-title"></h1>
+
+      <!-- до старта -->
+      <div id="today-before" hidden>
+        <div class="card ready-card"><b>План готов ✓</b><span id="today-plan-meta"></span></div>
+        <div class="card week-card">
+          <b id="today-week1-title"></b>
+          <ul class="wk-list" id="today-week1"></ul>
+        </div>
+        <button class="btn" id="today-open-plan">Проверить и доработать план</button>
+        <p class="muted small" id="today-edit-hint"></p>
+      </div>
+
+      <!-- во время цикла -->
+      <div id="today-active" hidden>
+        <p class="muted small edit-window" id="today-edit-window" hidden><span></span> <button class="link inline" id="today-edit-plan">Открыть план</button></p>
+        <div class="card note-card" id="today-locked" hidden></div>
+        <div class="card empty-card" id="today-buffer" hidden>
+          <b>Эта неделя — буфер</b>
+          <p class="muted">По плану на этой неделе действий нет, чек-ин не нужен. Отдохни или доделай то, что не успела раньше.</p>
+        </div>
+        <div id="today-list-block">
+        <h2 id="today-day"></h2>
+        <div class="tasks" id="today-list"></div>
+        <p class="muted" id="today-empty" hidden>На сегодня по плану ничего нет — отдохни или загляни в действия недели 🌿</p>
+
+        <h2>На этой неделе</h2>
+        <div class="tasks" id="week-list"></div>
+        <p class="muted small" id="week-empty" hidden>Разовых действий на этой неделе нет.</p>
+        </div>
+
+        <div class="card progress-card" id="week-progress-card">
+          <div class="pc-head"><b id="week-progress-text"></b><span id="week-progress-pct"></span></div>
+          <div class="ob-bar"><i id="week-progress-fill"></i></div>
+          <p class="pc-note">Действие засчитывается, когда отмечены все его дни на этой неделе. Итоговый % недели — по чек-ину.</p>
+        </div>
+        <div class="card checkin-card" id="checkin-card">
+          <b id="checkin-card-title"></b>
+          <p class="muted" id="checkin-card-text"></p>
+          <button class="btn" id="today-checkin">Отметить неделю</button>
+        </div>
+      </div>
+
+      <!-- после цикла -->
+      <p class="muted" id="today-over" hidden>Итоги и старт нового цикла — в чате с ботом.</p>
+      <button class="btn" id="today-over-checkin" hidden>Отметить неделю 12</button>
+    </section>
+
+    <!-- Вкладка «Прогресс»: как у меня получается? -->
+    <section class="screen tab-screen" id="screen-progress" hidden>
+      <p class="eyebrow" id="progress-eyebrow">12 недель</p>
+      <h1>Прогресс</h1>
+      <div class="card empty-card" id="progress-empty" hidden>
+        <b id="progress-empty-title"></b>
+        <p class="muted" id="progress-empty-text"></p>
+      </div>
+      <div id="progress-data">
+      <div class="tiles tiles-3">
+        <div class="tile"><span class="tile-label">Средний</span><span class="tile-value" id="home-avg">—</span><span class="tile-note" id="home-avg-note"></span></div>
+        <div class="tile"><span class="tile-label">Неделя</span><span class="tile-value" id="progress-week">—</span><span class="tile-note">из 12</span></div>
+        <div class="tile"><span class="tile-label">Выполнено</span><span class="tile-value" id="progress-done">0</span><span class="tile-note">действий</span></div>
+      </div>
+      <h2>По неделям</h2>
+      <figure class="chart bars" aria-label="Процент выполнения по неделям">
+        <svg id="score-chart" viewBox="0 0 360 190" role="img"></svg>
+        <div class="tooltip" id="score-tip" hidden></div>
+        <figcaption class="legend status-legend">
+          <span><i class="sq good"></i>85%+ по плану</span>
+          <span><i class="sq warning"></i>70–84% почти по плану</span>
+          <span><i class="sq critical"></i>&lt;70% пересмотреть план</span>
+        </figcaption>
+      </figure>
+      <p class="muted small">Это ориентиры, а не оценка тебя: неделя ниже 70% — повод посмотреть, что помешало.</p>
+      <div class="card warn" id="progress-dips" hidden></div>
+      <h2>История чек-инов</h2>
+      <div class="history" id="progress-history"></div>
+      </div>
+      <button class="btn" id="first-week-checkin">Заполнить первую неделю</button>
+      <!-- Моя команда: только проценты за неделю, как /team в чате -->
+      <div class="card team-card" id="team-card" hidden>
+        <b id="team-title"></b>
+        <div class="team-rows" id="team-rows"></div>
+        <p class="muted small" id="team-note">Процент появляется, когда участница отметила все действия недели. Видно только процент — без целей и действий.</p>
+      </div>
+    </section>
+
+    <!-- Чек-ин -->
+    <section class="screen" id="screen-checkin" hidden>
+      <p class="eyebrow" id="checkin-eyebrow"></p>
+      <h1>Как прошла неделя?</h1>
+      <p class="muted">Отметь по каждому действию: получилось или нет. Честно — это только для тебя, команда увидит лишь процент.</p>
+      <p class="counter" id="checkin-count"></p>
+      <div id="checkin-list"></div>
+    </section>
+
+    <!-- Результат недели -->
+    <section class="screen" id="screen-result" hidden>
+      <div class="result">
+        <p class="eyebrow" id="result-eyebrow"></p>
+        <div class="result-value" id="result-value"></div>
+        <p class="result-rating" id="result-rating"></p>
+        <p class="muted" id="result-count"></p>
+        <div class="card" id="result-advice"></div>
+      </div>
+    </section>
+
+    <!-- Шаги, которые пока в чате -->
+    <section class="screen" id="screen-later" hidden>
+      <h1>Привет, <span data-name></span>!</h1>
+      <p id="later-text">Твои следующие шаги пока проходят в чате с ботом.</p>
+      <p class="muted">Скоро здесь появятся 12-недельный план, чек-ины с историей и твоя команда.</p>
+    </section>
+  </main>
+  <!-- Нижние вкладки — только после подтверждения плана -->
+  <nav class="tabbar" id="tabbar" hidden aria-label="Разделы">
+    <button type="button" data-tab="today"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Сегодня</button>
+    <button type="button" data-tab="plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>План</button>
+    <button type="button" data-tab="progress"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>Прогресс</button>
+  </nav>
+
+  <!-- Состояние под главной кнопкой: «Оценено 3 из 6», «Выбрано 2 из 3» -->
+  <div class="cta-status" id="cta-status" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
