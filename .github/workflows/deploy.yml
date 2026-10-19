@@ -37,3 +37,21 @@ jobs:
       - run: flyctl deploy --remote-only --ha=false
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      # Fly может отчитаться об успехе, оставив машину остановленной (так было 19.10 при сбое их API).
+      # Поэтому: запускаем остановленные машины и ждём ответа /healthz по настоящему адресу.
+      - name: Make sure the bot is running and answers /healthz
+        run: |
+          for id in $(flyctl machine list --json | jq -r '.[] | select(.state != "started") | .id'); do
+            echo "Machine $id is not started — starting it"
+            flyctl machine start "$id"
+          done
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 https://twelve-weeks-astana.fly.dev/healthz; then echo; echo "Bot is up"; exit 0; fi
+            sleep 10
+          done
+          echo "/healthz did not answer within 5 minutes — recent logs:"
+          flyctl machine list
+          flyctl logs --no-tail | tail -n 200
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
