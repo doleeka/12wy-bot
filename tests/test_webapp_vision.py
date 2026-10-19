@@ -62,7 +62,7 @@ async def test_too_long_is_rejected_and_nothing_changes(api, sessionmaker):  # n
 
 
 async def test_editable_after_start_while_plan_is_locked(api, sessionmaker):  # noqa: F811
-    await make_user(sessionmaker, cycle_start=THIS_WEEK - timedelta(days=14))  # идёт неделя 3
+    await make_user(sessionmaker, cycle_start=THIS_WEEK - timedelta(weeks=12))  # цикл закончился, план закрыт
     plan = (await api.get("/api/plan", headers=auth())).json()
     assert plan["editable"] is False
     tid = plan["priorities"][0]["tactics"][0]["id"]

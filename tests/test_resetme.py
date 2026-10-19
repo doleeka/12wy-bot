@@ -15,7 +15,8 @@ async def count(session, model):
     return await session.scalar(select(func.count()).select_from(model))
 
 
-async def test_resetme_wipes_cycle_but_keeps_team(sessionmaker, tg):  # noqa: F811
+async def test_resetme_keeps_personal_progress(sessionmaker, tg):  # noqa: F811
+    """Личное прохождение защищено: /resetme только подсказывает, как начать новый тест в /testapp."""
     await make_user(sessionmaker, ADMIN_ID)
     async with sessionmaker() as session:
         user = await teams.get_user_by_telegram_id(session, ADMIN_ID)
@@ -24,13 +25,12 @@ async def test_resetme_wipes_cycle_but_keeps_team(sessionmaker, tg):  # noqa: F8
         await session.commit()
 
     await send(tg, "/resetme", ADMIN_ID, "private", ADMIN_ID)
-    assert "сброшен" in tg[2].sent(ADMIN_ID)[-1]
+    assert "/testapp" in tg[2].sent(ADMIN_ID)[-1]
     async with sessionmaker() as session:
         user = await teams.get_user_by_telegram_id(session, ADMIN_ID)
-        assert user.onboarding_step == OnboardingStep.WHEEL and user.cycle_start is None
-        assert await count(session, WeeklyTactic) == 0 and await count(session, Checkin) == 0
-        assert await count(session, EssentialIntent) == 0
-        assert await teams.get_team_of(session, user) is not None  # команда осталась
+        assert user.onboarding_step == OnboardingStep.DONE and user.cycle_start is not None
+        assert await count(session, WeeklyTactic) == 4 and await count(session, Checkin) == 1
+        assert await teams.get_team_of(session, user) is not None
 
 
 async def test_resetme_admin_only(sessionmaker, tg):  # noqa: F811

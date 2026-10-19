@@ -1,5 +1,5 @@
-"""Окно правок плана: до старта и первые 3 календарных дня цикла по Asia/Almaty (старт 05.10 → до 07.10
-включительно, с 08.10 закрыт). Видение — всегда. «Выбрать 3 заново» — только до старта."""
+"""Окно правок плана: до старта и весь цикл по Asia/Almaty (старт 05.10 → до 27.12 включительно, с 28.12
+закрыт); прошлые недели защищены снимками плана. Видение — всегда. «Выбрать 3 заново» — только до старта."""
 from datetime import date, datetime, timezone
 
 import httpx
@@ -55,18 +55,18 @@ async def edits(api, plan):
 @pytest.mark.parametrize("today, editable", [
     (date(2026, 10, 4), True),   # до старта
     (date(2026, 10, 5), True),   # день 1
-    (date(2026, 10, 7), True),   # день 3 — последний
-    (date(2026, 10, 8), False),  # день 4 — закрыт
-    (date(2026, 11, 20), False),
+    (date(2026, 10, 8), True),   # после первых дней — тоже можно
+    (date(2026, 12, 27), True),  # последний день цикла
+    (date(2026, 12, 28), False), # цикл закончился — закрыт
 ])
 async def test_boundaries(api, today, editable):
     plan = await confirmed(api)
-    assert plan["cycle_start"] == "2026-10-05" and plan["editable_until"] == "2026-10-07"
+    assert plan["cycle_start"] == "2026-10-05" and plan["editable_until"] == "2026-12-27"
     api.today = today
     plan = (await api.get("/api/plan", headers=auth())).json()
-    assert plan["editable"] is editable and plan["editable_until"] == "2026-10-07"
+    assert plan["editable"] is editable and plan["editable_until"] == "2026-12-27"
     t = (await api.get("/api/today", headers=auth())).json()
-    assert t["editable"] is editable and t["editable_until"] == "2026-10-07"
+    assert t["editable"] is editable and t["editable_until"] == "2026-12-27"
     want = 200 if editable else 409
     assert await edits(api, plan) == {"priority": want, "intent": want, "add": want, "edit": want, "vision": 200}
     # «выбрать 3 заново» — только до старта (иначе стёрлись бы отметки первых дней)
@@ -94,15 +94,15 @@ async def test_midnight_in_almaty_not_utc(api, monkeypatch):
                 return utc.astimezone(tz) if tz else utc
         monkeypatch.setattr(config, "datetime", Frozen)
 
-    at(datetime(2026, 10, 7, 18, 59, tzinfo=timezone.utc))  # 23:59 07.10 в Астане
+    at(datetime(2026, 12, 27, 18, 59, tzinfo=timezone.utc))  # 23:59 27.12 в Астане
     assert (await api.get("/api/plan", headers=auth())).json()["editable"] is True
-    at(datetime(2026, 10, 7, 19, 0, tzinfo=timezone.utc))   # 00:00 08.10 в Астане (в UTC ещё 7-е)
+    at(datetime(2026, 12, 27, 19, 0, tzinfo=timezone.utc))   # 00:00 28.12 в Астане (в UTC ещё 27-е)
     assert (await api.get("/api/plan", headers=auth())).json()["editable"] is False
 
 
 @pytest.mark.parametrize("confirm_on, start, until", [
-    (date(2026, 10, 5), "2026-10-05", "2026-10-07"),  # подтвердила в день старта — правки до 07.10
-    (date(2026, 10, 6), "2026-10-05", "2026-10-07"),  # позже — тот же общий старт и то же окно правок
+    (date(2026, 10, 5), "2026-10-05", "2026-12-27"),  # подтвердила в день старта — правки до конца цикла
+    (date(2026, 10, 6), "2026-10-05", "2026-12-27"),  # позже — тот же общий старт и то же окно правок
 ])
 async def test_late_onboarding(api, confirm_on, start, until):
     api.today = confirm_on
@@ -136,20 +136,21 @@ async def test_deleting_action_with_marks_keeps_them(api, sessionmaker):
     assert ticked not in [i["id"] for i in today["today_items"] + today["week_items"]]
     assert today["week_progress"]["done"] == 0
     assert (await api.get("/api/scorecard", headers=auth())).json()["done_total"] == 0
-    # действие без отметок удаляется как раньше
+    # действие без отметок тоже только скрывается — на него могут ссылаться снимки плана прошлых недель
     plan = (await api.post("/api/tactics", headers=auth(), json={"priority_id": pid, "text": "Растяжка 10 минут", "days": [3]})).json()
     fresh = plan["priorities"][0]["tactics"][-1]["id"]
     await api.delete(f"/api/tactics/{fresh}", headers=auth())
     async with sessionmaker() as session:
-        assert await session.get(WeeklyTactic, fresh) is None
+        t = await session.get(WeeklyTactic, fresh)
+        assert t is not None and t.is_active is False
 
 
 async def test_everyone_starts_on_cohort_date(api, sessionmaker):
     api.today = date(2026, 10, 1)
     await confirmed(api, user_id=43)
     api.today = date(2026, 10, 9)
-    plan = await confirmed(api)  # подтвердила уже после окна правок — старт всё равно 05.10
-    assert plan["cycle_start"] == "2026-10-05" and plan["editable"] is False
+    plan = await confirmed(api)  # подтвердила позже — старт всё равно 05.10
+    assert plan["cycle_start"] == "2026-10-05" and plan["editable"] is True
     t = (await api.get("/api/today", headers=auth())).json()
     assert t["status"] == "active" and t["week_number"] == 1
     async with sessionmaker() as session:

@@ -85,6 +85,9 @@ class User(Base):
     sandbox_week: Mapped[int | None] = mapped_column(Integer)
     sandbox_checked_weeks: Mapped[list | None] = mapped_column(JSON)
     no_team: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Исключён админом из сообщества (/remove): ничего не получает, не считается, приложение закрыто.
+    # Данные не удаляются — /restore возвращает
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")

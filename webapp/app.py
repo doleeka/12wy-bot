@@ -130,6 +130,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         if sandbox and tg.user.id not in settings.admin_ids:
             raise HTTPException(403, "admin_only")
         user = await get_or_create_user(session, tg.user)
+        if user.excluded_at is not None and user.telegram_id not in settings.admin_ids:
+            raise HTTPException(status_code=403, detail="excluded")  # исключена из сообщества (/remove)
         if sandbox:
             user.no_team = True
             if user.sandbox_week is None:
