@@ -1,0 +1,57 @@
+# Ручной откат: выкатить образ, который работал до указанного момента (по умолчанию — до 19.10 10:40 UTC),
+# поднять машину, проверить /healthz и сохранить исходники этого образа артефактом (для сверки кода).
+name: Rollback to previous image
+
+on:
+  workflow_dispatch:
+    inputs:
+      before:
+        description: "Взять последний релиз, созданный раньше этого момента (UTC, ISO)"
+        default: "2026-10-19T10:40:00Z"
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Pick the image
+        id: pick
+        run: |
+          flyctl releases --image --json > releases.json
+          jq -r '.[] | "\(.Version // .version) \(.CreatedAt // .createdAt) \(.Status // .status) \(.ImageRef // .imageRef // .Image // "")"' releases.json | head -n 15
+          IMAGE=$(jq -r --arg b "${{ inputs.before }}" '[.[] | select(((.CreatedAt // .createdAt) < $b) and ((.ImageRef // .imageRef // .Image // "") != ""))] | sort_by(.CreatedAt // .createdAt) | last | (.ImageRef // .imageRef // .Image)' releases.json)
+          echo "Chosen image: $IMAGE"
+          test -n "$IMAGE" && test "$IMAGE" != "null"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Save the source of that image
+        run: |
+          flyctl auth docker
+          docker pull "${{ steps.pick.outputs.image }}"
+          cid=$(docker create "${{ steps.pick.outputs.image }}")
+          mkdir -p image-src && docker cp "$cid:/app/." image-src/ && docker rm "$cid"
+          ls -R image-src/bot/migrations/versions | head -n 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-src
+          path: image-src
+      - name: Deploy that image
+        run: flyctl deploy --image "${{ steps.pick.outputs.image }}" --ha=false
+      - name: Make sure the bot is running and answers /healthz
+        run: |
+          for id in $(flyctl machine list --json | jq -r '.[] | select(.state != "started") | .id'); do
+            flyctl machine start "$id"
+          done
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 https://twelve-weeks-astana.fly.dev/healthz; then echo; echo "Bot is up"; exit 0; fi
+            sleep 10
+          done
+          flyctl machine list
+          flyctl logs --no-tail | tail -n 120
+          exit 1
