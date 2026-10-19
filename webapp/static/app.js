@@ -2,6 +2,7 @@
 (function () {
   "use strict";
 
+  const sandbox = location.pathname.startsWith("/sandbox/");
   const tg = window.Telegram && window.Telegram.WebApp;
   const $ = (sel) => document.querySelector(sel);
   const state = {
@@ -10,6 +11,18 @@
   };
   let mainHandler = null;
   let backHandler = null;
+
+  if (sandbox) {
+    $("#sandbox-reset").onclick = () => tg.showConfirm("Начать новый тест? Личное прохождение не изменится.", async ok => {
+      if (!ok) return;
+      try { await api("POST", "/api/sandbox/reset"); location.reload(); }
+      catch (_) { $("#sandbox-result").textContent = " Не удалось начать тест. Повтори."; }
+    });
+    $("#sandbox-apply").onclick = async () => {
+      try { await api("POST", "/api/sandbox/week/" + $("#sandbox-week").value); location.reload(); }
+      catch (_) { $("#sandbox-result").textContent = " Сначала заверши тестовый онбординг."; }
+    };
+  }
 
   // ---------- Telegram ----------
 
@@ -101,7 +114,10 @@
   // ---------- API ----------
 
   async function api(method, path, body) {
-    const res = await fetch(path, {
+    if (method !== "GET" && state.plan?.step === "done" && /^\/api\/(priorities\/|tactics|intent)/.test(path)) {
+      path += "?effective_week=" + (state.editWeek || state.plan.current_week);
+    }
+    const res = await fetch((sandbox ? "/sandbox" : "") + path, {
       method,
       headers: { "Content-Type": "application/json", Authorization: "tma " + tg.initData },
       body: body ? JSON.stringify(body) : undefined,
@@ -838,7 +854,7 @@
 
   // Таблица «тактики × 12 недель»: строка — тактика (цвет приоритета), колонка — неделя, внизу — нагрузка
   function renderGrid(box, plan) {
-    const weeks = Array.from({ length: plan.weeks_total }, (_, i) => i + 1);
+    const weeks = Array.from({ length: plan.weeks_total }, (_, i) => i + 1).filter(w => w >= (plan.display_from_week || 1));
     const table = el2("table");
     table.setAttribute("aria-label", "План по неделям");
     const cols = el2("colgroup");
@@ -874,7 +890,7 @@
     const foot = table.createTFoot().insertRow();
     foot.appendChild(el2("th", "name", "в неделю"));
     const peak = Math.max(...plan.load);
-    plan.load.forEach((n) => foot.appendChild(el2("td", n === peak && n > 0 ? "peak" : null, String(n))));
+    weeks.forEach(w => { const n = plan.load[w - 1]; foot.appendChild(el2("td", n === peak && n > 0 ? "peak" : null, String(n))); });
     box.innerHTML = "";
     box.appendChild(table);
     gridHint();
@@ -897,6 +913,7 @@
     const plan = state.plan;
     const box = $("#tactic-groups");
     box.innerHTML = "";
+    if (planConfirmed()) box.appendChild(el2("p", "card", "Изменения — с недели " + (state.editWeek || plan.current_week) + ". Каждая правка сохраняется отдельно. Прежние планы и отметки — в истории."));
     plan.priorities.forEach((p) => {
       const group = el2("div", "group");
       const head = el2("div", "group-head");
@@ -904,7 +921,7 @@
       dot.style.background = "var(--p" + p.position + ")";
       head.append(dot, el2("b", null, p.position + ". " + p.title));
       const pen = el2("button", "edit-prio", "✏️");
-      pen.setAttribute("aria-label", "Изменить цель и «зачем»");
+      pen.setAttribute("aria-label", "Изменить или заменить приоритет");
       pen.addEventListener("click", () => openPriorityEditor(p));
       head.appendChild(pen);
       group.append(head, el2("p", "why", "Зачем: " + p.intent));
@@ -950,13 +967,23 @@
 
   async function showTactics() {
     try { state.plan = await api("GET", "/api/plan"); } catch (e) { return failed(e); }
+    if (planConfirmed() && state.plan.started) {
+      const n = state.plan.current_week;
+      const next = n < 12;
+      const selected = await new Promise(resolve => tg.showPopup({title: "Когда изменить план?",
+        message: "История прошлых недель сохранится. При изменении текущей недели её состав и процент могут измениться; прежние отметки останутся в истории.",
+        buttons: [...(!state.plan.scheduled && !state.plan.current_checked ? [{id: "current", type: "default", text: "С этой недели"}] : []),
+          ...(next ? [{id: "next", type: "default", text: "Со следующей"}] : []), {type: "cancel"}]}, resolve));
+      if (!selected) return;
+      state.editWeek = n + (selected === "next" ? 1 : 0);
+    }
     toTactics();
   }
 
   // ---------- цель и «зачем» ----------
 
   function priorityValid() {
-    return $("#prio-title").value.trim().length > 0 && $("#prio-intent").value.trim().length >= 15;
+    return (!$("#prio-replace").checked || $("#prio-first-action").value.trim().length > 0) && $("#prio-title").value.trim().length > 0 && $("#prio-intent").value.trim().length >= 15;
   }
 
   function refreshPriorityEditor() {
@@ -969,6 +996,10 @@
     state.editPriority = p;
     show("screen-priority-edit");
     $("#prio-eyebrow").textContent = "Приоритет " + p.position;
+    $("#prio-replace").checked = false;
+    $("#prio-first-action").value = "";
+    $("#prio-replacement-fields").hidden = true;
+    $("#prio-replace-box").hidden = !planConfirmed();
     $("#prio-title").value = p.title;
     $("#prio-intent").value = p.intent;
     backButton(toTactics);
@@ -982,6 +1013,8 @@
       state.plan = await api("PUT", "/api/priorities/" + state.editPriority.id, {
         title: $("#prio-title").value.trim(),
         intent: $("#prio-intent").value.trim(),
+        replace: $("#prio-replace").checked,
+        first_action: $("#prio-first-action").value.trim(),
       });
       haptic.ok();
       toTactics();
@@ -1156,7 +1189,7 @@
   }
 
   function deleteTactic() {
-    tg.showConfirm("Удалить это действие?", async (ok) => {
+    tg.showConfirm("Убрать действие из нового плана? Прежний план и отметки сохранятся в истории.", async (ok) => {
       if (!ok) return;
       try {
         state.plan = await api("DELETE", "/api/tactics/" + state.edit.tacticId);
@@ -1171,7 +1204,7 @@
   function overloadedWeeks(plan) {
     const sorted = plan.load.slice().sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
-    return plan.load.map((n, i) => [i + 1, n]).filter(([, n]) => n >= median + 2 && n >= 4).map(([w, n]) => ({ w, n, median }));
+    return plan.load.map((n, i) => [i + 1, n]).filter(([w, n]) => w >= (plan.display_from_week || 1) && n >= median + 2 && n >= 4).map(([w, n]) => ({ w, n, median }));
   }
 
   function renderWeeks(plan) {
@@ -1182,7 +1215,7 @@
     everyBox.innerHTML = "";
     if (every.length) {
       const card = el2("div", "card week-card");
-      card.appendChild(el2("b", null, "Каждую неделю"));
+      card.appendChild(el2("b", null, "Каждую неделю, начиная с " + (plan.display_from_week || 1) + "-й"));
       const ul = el2("ul", "wk-list");
       every.forEach((t) => {
         const li = el2("li", "p" + t.pos, t.text);
@@ -1195,7 +1228,7 @@
     const box = $("#plan-weeks");
     box.innerHTML = "";
     const heavy = new Set(overloadedWeeks(plan).map((o) => o.w));
-    for (let w = 1; w <= plan.weeks_total; w++) {
+    for (let w = (plan.display_from_week || 1); w <= plan.weeks_total; w++) {
       const special = all.filter((t) => t.weeks != null && t.weeks.includes(w));
       const row = el2("div", "week-row" + (heavy.has(w) ? " heavy" : ""));
       const head = el2("div", "wk-head");
@@ -1259,14 +1292,20 @@
     $("#plan-buffer").textContent = bufferText(plan);
     $("#edit-plan").hidden = !review;
     $("#plan-edit-box").hidden = review || !plan.editable;
-    if (!review && plan.editable && plan.editable_until) {
-      // точный срок — по тем же данным, по которым сервер разрешает правки
-      const before = !started;
-      $("#plan-edit-title").textContent = "План можно менять до " + formatDate(plan.editable_until) + " включительно";
-      $("#plan-edit-text").textContent = (before ? "Поговорила с командой, передумала — " : "Первые 3 дня цикла — чтобы подстроить план под реальную неделю: ") +
-        "цели, «зачем», действия и их дни. С " + formatDate(addDays(plan.editable_until, 1)) + " план закроется. Видение можно менять всегда.";
-      $("#plan-reselect").hidden = !plan.reselect_allowed; // «заново» — только до старта: иначе пропали бы отметки первых дней
+    if (!review && plan.editable) {
+      $("#plan-edit-title").textContent = "План можно менять";
+      $("#plan-edit-text").textContent = "Уточняй цели или выбирай другие приоритеты. Старые планы и отметки сохраняются в истории. " +
+        (plan.scheduled ? "Уже есть изменения со следующей недели — здесь показан будущий план." : "Выбери, с какой недели применить изменения. Предыдущие недели смотри в истории плана.");
+      $("#plan-reselect").hidden = !plan.reselect_allowed;
     }
+    let history = $("#plan-history-button");
+    if (!history) {
+      history = el2("button", "btn secondary", "История плана");
+      history.id = "plan-history-button";
+      $("#plan-edit-box").after(history);
+      history.addEventListener("click", showPlanHistory);
+    }
+    history.hidden = review;
     $("#plan-switch").hidden = review; // «Видение | 12 недель» — только в постоянной вкладке
     setPlanView(review ? "weeks" : state.planView || "weeks");
     if (review) {
@@ -1277,6 +1316,42 @@
     } else {
       tabs("plan");
     }
+  }
+
+  async function showPlanHistory() {
+    let data;
+    try { data = await api("GET", "/api/plan/history"); } catch (e) { return failed(e); }
+    let screen = $("#screen-plan-history");
+    if (!screen) {
+      screen = el2("section", "screen"); screen.id = "screen-plan-history";
+      $("#screen-plan").after(screen);
+    }
+    screen.replaceChildren(el2("h1", null, "История плана"));
+    screen.appendChild(el2("p", "muted", "Предыдущие планы и отметки сохраняются при каждом изменении. Даты изменений указаны по времени Астаны."));
+    if (!data.changes.length) screen.appendChild(el2("p", null, "Пока изменений нет. Текущий план станет первой записью при редактировании."));
+    const draw = (parent, plan) => plan.forEach(p => {
+      parent.appendChild(el2("h3", null, p.position + ". " + p.title));
+      parent.appendChild(el2("p", null, "Зачем: " + p.intent));
+      p.tactics.forEach(t => parent.appendChild(el2("p", null, "• " + t.text + " · " +
+        (t.weeks ? "недели " + t.weeks.join(", ") : "каждую неделю") +
+        (t.days?.length ? " · " + t.days.map(d => DAYS[d]).join(", ") : ""))));
+    });
+    data.weeks.forEach(w => {
+      const card = el2("details", "card"); card.appendChild(el2("summary", null, "План недели " + w.week));
+      draw(card, w.plan); screen.appendChild(card);
+    });
+    data.changes.forEach(c => {
+      const card = el2("details", "card");
+      card.appendChild(el2("summary", null, new Date(c.date + "Z").toLocaleString("ru-RU", {timeZone: "Asia/Almaty"}) + " · " + c.kind + " · с недели " + c.week));
+      card.appendChild(el2("p", null, "План до изменения:")); draw(card, c.plan);
+      c.marks.forEach(m => {
+        const t = c.plan.flatMap(p => p.tactics).find(t => t.id === m.tactic_id);
+        card.appendChild(el2("p", null, (m.day || m.week) + " · " + (t?.text || "Действие #" + m.tactic_id) + " · " +
+          (m.type === "daily" ? "сделано за день" : m.done ? "сделано за неделю" : "не сделано за неделю")));
+      });
+      screen.appendChild(card);
+    });
+    show("screen-plan-history"); backButton(() => showPlan("view"));
   }
 
   async function confirmPlan() {
@@ -1412,6 +1487,7 @@
 
   function renderToday(d) {
     state.today = d;
+    $("#today-over-checkin").hidden = true;
     ["before", "active", "over"].forEach((k) => ($("#today-" + k).hidden = true));
     if (d.status === "not_started") {
       $("#today-eyebrow").textContent = "Старт — " + formatDate(d.cycle_start);
@@ -1429,20 +1505,22 @@
       });
       $("#today-open-plan").textContent = d.editable ? "Проверить и доработать план" : "Посмотреть план";
       $("#today-edit-hint").textContent = d.editable && d.editable_until
-        ? "Цели, «зачем» и действия можно менять до " + formatDate(d.editable_until) + " включительно: до старта и в первые 3 дня цикла." : "";
+        ? "Цели, «зачем» и действия можно менять в течение цикла. История сохраняется." : "";
       return;
     }
     if (d.status === "over") {
       $("#today-eyebrow").textContent = "12 недель";
       $("#today-title").textContent = "12 недель позади 🎉";
       $("#today-over").hidden = false;
+      $("#today-over-checkin").hidden = !d.checkin_target_week;
+      $("#today-over-checkin").textContent = d.checkin_deadline ? "Отметить неделю 12 · до " + formatDate(d.checkin_deadline) : "";
       return;
     }
     $("#today-active").hidden = false;
     // первые 3 дня цикла: план ещё можно поправить — точный срок и вход в план
     const win = $("#today-edit-window");
     win.hidden = !(d.editable && d.editable_until);
-    if (!win.hidden) win.querySelector("span").textContent = "План ещё можно поправить — до " + formatDate(d.editable_until) + " включительно.";
+    if (!win.hidden) win.querySelector("span").textContent = "План можно менять. Предыдущие недели сохранятся в истории.";
     $("#today-eyebrow").textContent = "Неделя " + d.week_number + " из 12 · " + period(d.week_start, d.week_end);
     $("#today-title").textContent = "Что делать сейчас";
     $("#today-day").textContent = "Сегодня, " + WEEKDAY_NAMES[d.weekday];
@@ -1474,6 +1552,15 @@
       : "Отметь по каждому действию: получилось или нет. Галочки выше уже подставлены.";
     $("#today-checkin").textContent = d.checkin_done ? "Изменить отметки" : "Отметить неделю " + d.week_number;
     $("#today-checkin").hidden = !wp.planned;
+    if (d.checkin_target_week && d.checkin_target_week !== d.week_number) {
+      $("#checkin-card").hidden = false;
+      $("#checkin-card-title").textContent = "Заверши чек-ин недели " + d.checkin_target_week;
+      $("#checkin-card-text").textContent = d.checkin_target_week === 1 ? "Первую неделю можно заполнить и позже — она остаётся открытой." : "Можно заполнить до конца вторника, " + formatDate(d.checkin_deadline) + " (время Астаны).";
+      $("#today-checkin").textContent = "Отметить неделю " + d.checkin_target_week;
+      $("#today-checkin").hidden = false;
+    } else {
+      $("#checkin-card-text").textContent += d.week_number === 1 ? " Первую неделю можно заполнить и позже." : " Чек-ин доступен до конца вторника, " + formatDate(d.checkin_deadline) + " (время Астаны).";
+    }
   }
 
   function addDays(iso, n) {
@@ -1530,6 +1617,7 @@
     tabs("progress");
     renderTeam();
     // пока нет ни одного чек-ина — не пустой график, а объяснение, когда появятся данные
+    $("#first-week-checkin").hidden = !sc.cycle_start || sc.current_week === null && sc.weeks.every(w => w.future);
     const hasData = sc.weeks.some((w) => w.percent != null);
     $("#progress-empty").hidden = hasData;
     $("#progress-data").hidden = !hasData;
@@ -1581,8 +1669,9 @@
   const showHome = showToday; // «домой» после онбординга — вкладка «Сегодня»
 
   // Чек-ин из «Сегодня»: чек-ин API знает неделю (в понедельник — ещё прошлую, если не отмечена)
-  async function openCheckin() {
-    try { state.checkin = await api("GET", "/api/checkin"); } catch (e) { return failed(e); }
+  async function openCheckin(weekNumber) {
+    const path = "/api/checkin" + (typeof weekNumber === "number" ? "?week_number=" + weekNumber : "");
+    try { state.checkin = await api("GET", path); } catch (e) { return failed(e); }
     if (state.checkin.status === "active") showCheckin();
   }
 
@@ -1666,6 +1755,9 @@
   function failed(e) {
     haptic.err();
     const messages = {
+      checked_plan: "Чек-ин этой недели уже сохранён. Выбери изменения со следующей недели — результат останется прежним.",
+      scheduled_plan: "Уже есть изменения со следующей недели. Продолжи редактировать будущий план.",
+      bad_effective_week: "Выбери текущую или следующую неделю цикла.",
       wrong_step: "Этот шаг уже пройден — открой приложение заново.",
       mark_all: "Отметь все действия этой недели.",
       week_closed: "Эта неделя уже закрыта для отметок.",
@@ -1737,7 +1829,14 @@
     }));
     $("#today-open-plan").addEventListener("click", openPlanView);
     $("#today-edit-plan").addEventListener("click", openPlanView);
+    $("#first-week-checkin").addEventListener("click", () => openCheckin(1));
     $("#today-checkin").addEventListener("click", openCheckin);
+    $("#today-over-checkin").addEventListener("click", openCheckin);
+    $("#prio-replace").addEventListener("change", () => {
+      $("#prio-replacement-fields").hidden = !$("#prio-replace").checked;
+      refreshPriorityEditor();
+    });
+    $("#prio-first-action").addEventListener("input", refreshPriorityEditor);
     $("#plan-edit").addEventListener("click", showTactics);
     document.querySelectorAll("#plan-switch button").forEach((b) => b.addEventListener("click", () => { haptic.tick(); setPlanView(b.dataset.view); }));
     $("#vision-fill").addEventListener("click", () => showVision("edit"));
@@ -1760,6 +1859,7 @@
     ["#prio-title", "#prio-intent"].forEach((sel) => $(sel).addEventListener("input", refreshPriorityEditor));
     try {
       state.me = await api("GET", "/api/me");
+      if (sandbox) $("#sandbox-week").value = String(state.me.test_week || 1);
       document.querySelectorAll("[data-name]").forEach((n) => (n.textContent = state.me.first_name || ""));
       const step = state.me.step;
       if (step === "wheel" || step === "explore") {
@@ -1775,7 +1875,7 @@
         showIntent();
       } else if (step === "tactics") {
         showTactics();
-      } else if (step === "done") {
+      } else if (step === "done" || step === "finished") {
         showHome();
       } else {
         $("#later-text").textContent = "12 недель позади — итоги и старт нового цикла пока в чате с ботом.";
@@ -1784,11 +1884,7 @@
         mainButton("Вернуться в чат", () => tg.close());
       }
     } catch (e) {
-      showError(
-        e.status === 401 ? "Сессия устарела — закройте приложение и откройте его снова из бота."
-        : e.detail === "excluded" ? "Доступ закрыт. Если это ошибка — напиши организатору."
-        : "Не получилось загрузиться. Попробуйте открыть приложение ещё раз."
-      );
+      showError(e.status === 401 ? "Сессия устарела — закройте приложение и откройте его снова из бота." : "Не получилось загрузиться. Попробуйте открыть приложение ещё раз.");
     }
   }
 

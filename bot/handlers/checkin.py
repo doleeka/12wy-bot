@@ -54,6 +54,8 @@ async def build_checkin(
             lines.append(texts.CHECKIN_PRIORITY.format(title=escape(tactic.priority.title)))
         lines.append(texts.CHECKIN_TACTIC.format(n=n, text=escape(tactic.text), mark=_MARK[marks.get(tactic.id)]))
     footer = (texts.CHECKIN_PREFILLED if prefilled else "") + texts.CHECKIN_FOOTER + (texts.CHECKIN_APP_HINT if webapp_url else "")
+    if checkins.checkin_week_number(user, week) == 1:
+        footer = footer.replace("Чек-ин доступен до конца следующего вторника (время Астаны).", "Первую неделю можно заполнить и позже — она остаётся открытой.")
     return "\n".join(lines) + footer, keyboards.checkin(tactics, week.toordinal(), webapp_url)
 
 
@@ -104,13 +106,21 @@ async def send_report(
 # ---------- участница ----------
 
 @router.message(Command("checkin"))
-async def cmd_checkin(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
+async def cmd_checkin(message: Message, session: AsyncSession, settings: Settings | None = None, command: CommandObject | None = None) -> None:
     user = await get_or_create_user(session, message.from_user)
     if user.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED):
         await message.answer(texts.CHECKIN_NOT_READY)
         return
     today = local_today(settings)
     week = default_checkin_week(user, today)
+    if command and command.args:
+        if command.args.strip() != "1":
+            await message.answer("Первая неделя: /checkin 1. Текущий чек-ин: /checkin")
+            return
+        if user.cycle_start is None or not checkins.can_check_in(user, user.cycle_start, today):
+            await message.answer("Первая неделя откроется после начала цикла.")
+            return
+        week = user.cycle_start
     if checkins.checkin_week_number(user, week) is None:
         if user.cycle_start and today < user.cycle_start:
             await message.answer(texts.CHECKIN_NOT_STARTED.format(start=f"{user.cycle_start:%d.%m}"))

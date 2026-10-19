@@ -65,7 +65,7 @@ async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team | None
     Возвращает (команда, создана_ли_новая). Коммитит сразу, внутри блокировки.
     Организатора вне команд (no_team) не распределяем: (None, False).
     """
-    if user.no_team or user.excluded_at is not None:
+    if user.no_team:
         return None, False
     async with _lock:
         team = await get_team_of(session, user)
@@ -113,6 +113,7 @@ async def move_to_team(session: AsyncSession, user: User, team_id: int | None) -
             session.add(TeamMember(team_id=new_team.id, user_id=user.id))
         else:
             membership.team_id = new_team.id
+        user.no_team = False
         await session.commit()
         return old_team, new_team
 
@@ -126,7 +127,7 @@ async def ready_without_team(session: AsyncSession) -> list[User]:
     rows = await session.scalars(
         select(User)
         .outerjoin(TeamMember, TeamMember.user_id == User.id)
-        .where(User.is_ready, TeamMember.id.is_(None), User.excluded_at.is_(None))
+        .where(User.is_ready, TeamMember.id.is_(None))
         .order_by(User.id)
     )
     return list(rows)

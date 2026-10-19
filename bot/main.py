@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from dataclasses import replace
 
 import uvicorn
 
@@ -17,8 +18,8 @@ from bot.commands import set_bot_commands, set_webapp_menu_button
 from bot.config import load_settings, local_today
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, broadcast, checkin, members, cycle, fallback, group, onboarding, start, teams, wheel
-from bot.middlewares import DbSessionMiddleware, ExcludedMiddleware
+from bot.handlers import admin, broadcast, checkin, cycle, fallback, group, onboarding, start, teams, wheel
+from bot.middlewares import DbSessionMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
@@ -37,14 +38,12 @@ class WebServer(uvicorn.Server):
 def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(sessionmaker))
-    dp.update.middleware(ExcludedMiddleware())  # исключённые из сообщества — только «доступ закрыт»
     # group — только групповые чаты; остальные роутеры — только личка (фильтр задан в каждом модуле)
     dp.include_routers(
         group.router,
         start.router,
         admin.router,
         broadcast.router,
-        members.router,
         teams.router,
         checkin.router,
         cycle.router,
@@ -79,6 +78,12 @@ async def main() -> None:
     sessionmaker = create_sessionmaker(engine)
     dp = build_dispatcher(sessionmaker)
     dp["settings"] = settings
+    sandbox_path = settings.database_path.parent / "sandbox" / "test.db"
+    sandbox_path.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(run_migrations, sandbox_path)
+    sandbox_engine = create_engine(f"sqlite+aiosqlite:///{sandbox_path}")
+    sandbox_sessions = create_sessionmaker(sandbox_engine)
+    dp["sandbox_sessionmaker"] = sandbox_sessions
 
     # Если у токена остался webhook (бот раньше был подключён к другому сервису), Telegram не отдаёт
     # обновления через getUpdates — бот работает, но не получает ни одного сообщения. Снимаем его.
@@ -102,8 +107,10 @@ async def main() -> None:
             texts.BOT_STARTED_ALIGNED.format(n=moved, start=f"{settings.cycle_start:%d.%m}") if moved else ""
         ))
     # Mini App (FastAPI) в том же процессе: общая база, тот же бот для уведомлений
+    app = create_app(sessionmaker, settings, bot)
+    app.mount("/sandbox", create_app(sandbox_sessions, replace(settings, cycle_start=None), sandbox=True))
     web = WebServer(
-        uvicorn.Config(create_app(sessionmaker, settings, bot), host="0.0.0.0", port=settings.port, log_level="warning")
+        uvicorn.Config(app, host="0.0.0.0", port=settings.port, log_level="warning")
     )
     web_task = asyncio.create_task(web.serve())
     logging.info("Mini App: порт %s, адрес %s", settings.port, settings.webapp_url or "не задан (WEBAPP_URL)")
@@ -116,6 +123,7 @@ async def main() -> None:
         scheduler.shutdown(wait=False)
         await bot.session.close()
         await engine.dispose()
+        await sandbox_engine.dispose()
 
 
 if __name__ == "__main__":

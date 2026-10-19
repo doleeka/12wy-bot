@@ -59,20 +59,9 @@ def rating_emoji(value: int | None) -> str:
 
 async def week_percent(session: AsyncSession, user: User, week: date) -> int | None:
     """% за неделю или None, если чек-ин за эту неделю ещё не заполнен целиком."""
-    done, marked = (
-        await session.execute(
-            select(func.coalesce(func.sum(cast(Checkin.done, Integer)), 0), func.count(Checkin.id))
-            .join(WeeklyTactic, WeeklyTactic.id == Checkin.tactic_id)
-            # убранное из плана действие (is_active=False) хранит свои отметки, но в процент не входит
-            .where(Checkin.user_id == user.id, Checkin.week_start == week, WeeklyTactic.is_active)
-        )
-    ).one()
-    tactics = await session.scalars(
-        select(WeeklyTactic).where(WeeklyTactic.user_id == user.id, WeeklyTactic.is_active)
-    )
-    n = week_number(user.cycle_start, week)
-    # запланировано — только тактики, которые по плану выпадают на эту неделю
-    planned = sum(1 for t in tactics if n is None or t.in_week(n))
-    if not marked or marked < planned:
+    from bot.services import checkins
+    tactics = await checkins.tactics_for_week(session, user, week)
+    marks = await checkins.get_marks(session, user, week)
+    if not tactics or any(t.id not in marks for t in tactics):
         return None
-    return percent(done, marked)
+    return percent(sum(marks[t.id] for t in tactics), len(tactics))

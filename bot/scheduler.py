@@ -46,9 +46,7 @@ async def send_week_planning(bot: Bot, sessionmaker: async_sessionmaker, setting
     today = local_today(settings)
     sent = 0
     async with sessionmaker() as session:
-        users = await session.scalars(
-            select(User).where(User.onboarding_step == OnboardingStep.DONE, User.excluded_at.is_(None))
-        )
+        users = await session.scalars(select(User).where(User.onboarding_step == OnboardingStep.DONE))
         for user in list(users):
             if cycle.maybe_finish_cycle(user, today):
                 # понедельник 13-й недели: вместо плана недели — итоги цикла

@@ -10,16 +10,16 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.utils.web_app import WebAppInitData
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text as sqltext
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.config import Settings, local_today
 from bot.models import Checkin, DailyMark, EssentialIntent, ExploreItem, OnboardingStep, Priority, User, WeeklyTactic, WheelOfBalance
-from bot.services import checkins, cycle, scorecard, tactics, teams, wheel
+from bot.services import checkins, cycle, scorecard, tactics, teams, wheel, plan_history
 from bot.services import today as today_svc
 from bot.services import vision as vision_svc
 from bot.services import onboarding as svc
@@ -71,6 +71,8 @@ class CheckinIn(BaseModel):
 class PriorityIn(BaseModel):
     title: str
     intent: str
+    replace: bool = False
+    first_action: str = ""
 
 
 class VisionIn(BaseModel):
@@ -103,24 +105,63 @@ class ChatTarget:
         await self.bot.send_message(self.chat_id, text, reply_markup=reply_markup)
 
 
-def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | None = None) -> FastAPI:
+def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | None = None, *, sandbox: bool = False) -> FastAPI:
     app = FastAPI(title="12 Week Year", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.sessionmaker = sessionmaker
     app.state.settings = settings
-    app.state.bot = bot
+    app.state.bot = None if sandbox else bot
 
-    async def db() -> AsyncIterator[AsyncSession]:
+    def today_for(user: User) -> date:
+        today = local_today(settings)
+        if sandbox and user.cycle_start and user.sandbox_week:
+            return user.cycle_start + timedelta(weeks=user.sandbox_week - 1, days=today.weekday())
+        return today
+
+    async def db(request: Request) -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as session:
+            if request.method in {"POST", "PUT", "DELETE"}:
+                await session.execute(sqltext("BEGIN IMMEDIATE"))
             yield session
             await session.commit()
 
     async def current_user(
         tg: WebAppInitData = Depends(telegram_user), session: AsyncSession = Depends(db)
     ) -> User:
+        if sandbox and tg.user.id not in settings.admin_ids:
+            raise HTTPException(403, "admin_only")
         user = await get_or_create_user(session, tg.user)
-        if user.excluded_at is not None and user.telegram_id not in settings.admin_ids:
-            raise HTTPException(status_code=403, detail="excluded")  # исключена из сообщества (/remove)
+        if sandbox:
+            user.no_team = True
+            if user.sandbox_week is None:
+                user.sandbox_week = scorecard.week_number(user.cycle_start, local_today(settings)) or 1
+            if user.sandbox_checked_weeks is None:
+                user.sandbox_checked_weeks = [user.last_reported_week.isoformat()] if user.last_reported_week else []
         return user
+
+    if sandbox:
+        @app.post("/api/sandbox/reset")
+        async def sandbox_reset(user: User = Depends(current_user), session: AsyncSession = Depends(db)):
+            # Start a fresh test cycle while retaining previous test records.
+            user.cycle += 1
+            user.onboarding_step = OnboardingStep.WHEEL
+            user.cycle_start = None
+            user.last_reported_week = None
+            user.test_mode_since = None
+            user.onboarding_position = None
+            user.is_ready = False
+            user.sandbox_week = 1
+            user.sandbox_checked_weeks = []
+            return {"ok": True}
+
+        @app.post("/api/sandbox/week/{week}")
+        async def sandbox_week(week: int, user: User = Depends(current_user)):
+            if week not in range(1, 13):
+                raise HTTPException(422, "week")
+            if user.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED):
+                raise HTTPException(409, "finish_onboarding")
+            user.sandbox_week = week
+            user.onboarding_step = OnboardingStep.DONE
+            return {"ok": True}
 
     # ---------- профиль ----------
 
@@ -131,6 +172,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "step": user.onboarding_step.value,
             "cycle": user.cycle,
             "is_admin": user.telegram_id in settings.admin_ids,
+            **({"sandbox": True, "test_week": scorecard.week_number(user.cycle_start, today_for(user))} if sandbox else {}),
         }
 
     # ---------- колесо баланса ----------
@@ -207,12 +249,12 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         return (
             user.onboarding_step == OnboardingStep.DONE
             and user.cycle_start is not None
-            and local_today(settings) < user.cycle_start
+            and today_for(user) < user.cycle_start
         )
 
     def plan_editable(user: User) -> bool:
         """Подтверждённый план можно менять: до старта и в первые 3 дня цикла (единое правило для API и UI)."""
-        return cycle.plan_editable(user, local_today(settings))
+        return cycle.plan_editable(user, today_for(user))
 
     def require_plan_editable(user: User, *steps: OnboardingStep) -> None:
         if user.onboarding_step not in steps and not plan_editable(user):
@@ -300,12 +342,37 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def get_intent(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         return await intent_payload(session, user)
 
+    async def preserve_plan(session, user, request, kind):
+        if user.onboarding_step != OnboardingStep.DONE:
+            return
+        raw = request.query_params.get("effective_week")
+        try:
+            effective = int(raw) if raw else None
+            current = scorecard.week_number(user.cycle_start, today_for(user)) or 1
+            if (effective or current) == current and user.cycle_start and week_checked(user, scorecard.week_start(today_for(user))):
+                raise ValueError("checked_plan")
+            await plan_history.before_edit(session, user, today_for(user), effective, kind)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/plan/history")
+    async def plan_history_api(user: User = Depends(current_user), session: AsyncSession = Depends(db)):
+        from bot.models import PlanChange, PlanWeekSnapshot
+        changes = list(await session.scalars(select(PlanChange).where(PlanChange.user_id == user.id,
+            PlanChange.cycle == user.cycle).order_by(PlanChange.id.desc())))
+        weeks = list(await session.scalars(select(PlanWeekSnapshot).where(PlanWeekSnapshot.user_id == user.id,
+            PlanWeekSnapshot.cycle == user.cycle).order_by(PlanWeekSnapshot.week_number)))
+        return {"weeks": [{"week": w.week_number, "plan": w.plan} for w in weeks],
+            "changes": [{"id": c.id, "date": c.created_at.isoformat(), "week": c.effective_week,
+                "kind": c.kind, "plan": c.plan_before, "marks": c.marks_before} for c in changes]}
+
     @app.put("/api/intent")
     async def save_intent(
-        body: IntentIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+        body: IntentIn, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         require_plan_editable(user, OnboardingStep.INTENT, OnboardingStep.TACTICS)
         try:
+            await preserve_plan(session, user, request, "Изменено зачем")
             await svc.set_intents(session, user, body.intents)
         except ValueError:
             raise HTTPException(status_code=422, detail="intent_required") from None
@@ -341,7 +408,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                 }
             )
         team = await teams.get_team_of(session, user)
-        start = user.cycle_start or svc.cycle_start_for(local_today(settings), settings.cycle_start)
+        start = user.cycle_start or svc.cycle_start_for(today_for(user), settings.cycle_start)
         return {
             "step": user.onboarding_step.value,
             "priorities": out,
@@ -354,7 +421,11 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             # план можно менять: во время онбординга и после подтверждения — пока цикл не начался
             "editable": user.onboarding_step == OnboardingStep.TACTICS or plan_editable(user),
             "editable_until": edit_until_iso(user),  # последний день правок, включительно
-            "started": user.cycle_start is not None and local_today(settings) >= user.cycle_start,
+            "started": user.cycle_start is not None and today_for(user) >= user.cycle_start,
+            "display_from_week": (scorecard.week_number(user.cycle_start, today_for(user)) or 1) + int(bool(await plan_history.snapshot(session, user, scorecard.week_number(user.cycle_start, today_for(user)) or 1))),
+            "current_week": scorecard.week_number(user.cycle_start, today_for(user)) or 1,
+            "current_checked": week_checked(user, scorecard.week_start(today_for(user))),
+            "scheduled": bool(await plan_history.snapshot(session, user, scorecard.week_number(user.cycle_start, today_for(user)) or 1)),
             "reselect_allowed": user.onboarding_step == OnboardingStep.TACTICS or before_start(user),
         }
 
@@ -392,7 +463,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
 
     @app.put("/api/priorities/{priority_id}")
     async def edit_priority(
-        priority_id: int, body: PriorityIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+        priority_id: int, body: PriorityIn, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         """Переименовать цель и поправить её «зачем»."""
         require_plan_editable(user, OnboardingStep.TACTICS)
@@ -402,6 +473,17 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             raise HTTPException(status_code=422, detail="bad_title")
         if len(intent) < svc.MIN_INTENT_LEN:
             raise HTTPException(status_code=422, detail="intent_required")
+        if body.replace and not body.first_action.strip():
+            raise HTTPException(status_code=422, detail="empty")
+        if len(body.first_action.strip()) > tactics.MAX_TACTIC_LEN:
+            raise HTTPException(status_code=422, detail="too_long")
+        await preserve_plan(session, user, request, "Заменён приоритет" if body.replace else "Уточнена цель")
+        if body.replace:
+            old = await session.scalars(select(WeeklyTactic).where(WeeklyTactic.priority_id == priority.id))
+            for t in old:
+                t.is_active = False
+            session.add(WeeklyTactic(priority_id=priority.id, user_id=user.id,
+                text=body.first_action.strip(), weeks=None, days=None))
         priority.title = title
         existing = await session.scalar(select(EssentialIntent).where(EssentialIntent.priority_id == priority.id))
         if existing is None:
@@ -428,7 +510,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
 
     @app.post("/api/tactics")
     async def add_tactic(
-        body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+        body: TacticIn, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         require_plan_editable(user, OnboardingStep.TACTICS)
         priority = await own_priority(session, user, body.priority_id or 0)
@@ -438,23 +520,31 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         )
         if count >= tactics.MAX_TACTICS_PER_PRIORITY:
             raise HTTPException(status_code=422, detail="limit")
+        await preserve_plan(session, user, request, "Добавлено действие")
         session.add(WeeklyTactic(priority_id=priority.id, user_id=user.id, text=text, weeks=weeks, days=days))
         await session.flush()
         return await plan_payload(session, user)
 
     @app.put("/api/tactics/{tactic_id}")
     async def edit_tactic(
-        tactic_id: int, body: TacticIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+        tactic_id: int, body: TacticIn, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         require_plan_editable(user, OnboardingStep.TACTICS)
         tactic = await own_tactic(session, user, tactic_id)
-        tactic.text, tactic.weeks, tactic.days = clean_tactic(body)
+        text, weeks, days = clean_tactic(body)
+        await preserve_plan(session, user, request, "Изменено действие")
+        if user.onboarding_step == OnboardingStep.DONE:
+            tactic.is_active = False
+            session.add(WeeklyTactic(priority_id=tactic.priority_id, user_id=user.id,
+                                    text=text, weeks=weeks, days=days))
+        else:
+            tactic.text, tactic.weeks, tactic.days = text, weeks, days
         await session.flush()
         return await plan_payload(session, user)
 
     @app.delete("/api/tactics/{tactic_id}")
     async def delete_tactic(
-        tactic_id: int, user: User = Depends(current_user), session: AsyncSession = Depends(db)
+        tactic_id: int, request: Request, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
         require_plan_editable(user, OnboardingStep.TACTICS)
         tactic = await own_tactic(session, user, tactic_id)
@@ -467,12 +557,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             )
             if left <= 1:
                 raise HTTPException(status_code=422, detail="last_tactic")
-        checkins_n = await session.scalar(select(func.count(Checkin.id)).where(Checkin.tactic_id == tactic.id))
-        daily_n = await session.scalar(select(func.count(DailyMark.id)).where(DailyMark.tactic_id == tactic.id))
-        if checkins_n or daily_n:
-            tactic.is_active = False  # в первые дни цикла: убираем из плана, но отметки не теряем
-        else:
-            await session.delete(tactic)
+        await preserve_plan(session, user, request, "Убрано действие")
+        tactic.is_active = False  # Keep IDs, marks, and historical references even without marks.
         await session.flush()
         return await plan_payload(session, user)
 
@@ -484,7 +570,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         team = await teams.get_team_of(session, user)
         if team is None:
             return {"team": None, "organizer": user.no_team, "members": []}
-        this_week = scorecard.week_start(local_today(settings))
+        this_week = scorecard.week_start(today_for(user))
         members = []
         for m in await teams.team_members(session, team.id):
             current = await scorecard.week_percent(session, m, this_week)
@@ -505,7 +591,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def vision_payload(session: AsyncSession, user: User) -> dict:
         vision = await vision_svc.get_vision(session, user)
         texts = {f: getattr(vision, f) if vision else "" for f in vision_svc.FIELDS}
-        today = local_today(settings)
+        today = today_for(user)
         refl = await vision_svc.get_reflection(session, user)
         return {
             "vision": texts,
@@ -536,7 +622,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     async def save_reflection(
         body: ReflectionIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)
     ) -> dict:
-        if not vision_svc.reflection_open(user, local_today(settings)):
+        if not vision_svc.reflection_open(user, today_for(user)):
             raise HTTPException(status_code=409, detail="reflection_closed")
         try:
             texts = vision_svc.clean(body.model_dump(), vision_svc.REFLECTION_FIELDS)
@@ -550,10 +636,16 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     CHECKIN_STEPS = (OnboardingStep.DONE, OnboardingStep.FINISHED)
 
     @app.get("/api/checkin")
-    async def get_checkin(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
+    async def get_checkin(user: User = Depends(current_user), session: AsyncSession = Depends(db), week_number: int | None = None) -> dict:
         require_step(user, *CHECKIN_STEPS)
-        today = local_today(settings)
-        week = checkins.default_week(user, today)
+        today = today_for(user)
+        week = scorecard.week_start(today) if sandbox else checkins.default_week(user, today)
+        if week_number is not None:
+            if not 1 <= week_number <= 12 or user.cycle_start is None:
+                raise HTTPException(422, "bad_week")
+            week = user.cycle_start + timedelta(weeks=week_number - 1)
+            if not checkins.can_check_in(user, week, today):
+                raise HTTPException(409, "week_closed")
         n = checkins.checkin_week_number(user, week)
         if n is None:
             not_started = user.cycle_start is not None and today < user.cycle_start
@@ -570,6 +662,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             "week_number": n,
             "week_start": week.isoformat(),
             "week_end": (week + timedelta(days=6)).isoformat(),
+            "deadline": None if n == 1 else (week + timedelta(days=8)).isoformat(),
             "tactics": [
                 {
                     "id": t.id,
@@ -600,9 +693,14 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     @app.get("/api/today")
     async def get_today(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         require_step(user, *CHECKIN_STEPS)
-        today = local_today(settings)
+        today = today_for(user)
         all_tactics = await checkins.active_tactics(session, user)
+        target_week = scorecard.week_start(today) if sandbox else checkins.default_week(user, today)
+        target_n = checkins.checkin_week_number(user, target_week)
+        target_available = checkins.can_check_in(user, target_week, today)
         base = {
+            "checkin_target_week": target_n if target_available else None,
+            "checkin_deadline": (target_week + timedelta(days=8)).isoformat() if target_available else None,
             "today": today.isoformat(),
             "weekday": today.weekday(),
             "cycle_start": user.cycle_start.isoformat() if user.cycle_start else None,
@@ -623,7 +721,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             return base | {"status": "over"}
 
         week = scorecard.week_start(today)
-        week_tactics = [t for t in all_tactics if t.in_week(n)]
+        week_tactics = await checkins.tactics_for_week(session, user, week)
         checkin = await checkins.get_marks(session, user, week)
         daily = await today_svc.daily_marks(session, user, week)
         states = {t.id: today_svc.week_state(t, week, checkin, daily) for t in week_tactics}
@@ -653,6 +751,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         }
 
     def week_checked(user: User, week: date) -> bool:
+        if sandbox:
+            return week.isoformat() in (user.sandbox_checked_weeks or [])
         return user.last_reported_week is not None and user.last_reported_week >= week
 
     def require_open_week(user: User, week: date) -> None:
@@ -662,8 +762,14 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     @app.post("/api/today/daily")
     async def mark_daily(body: DailyIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         require_step(user, *CHECKIN_STEPS)
-        today = local_today(settings)
-        tactic = await own_tactic(session, user, body.tactic_id)
+        today = today_for(user)
+        original = await session.get(WeeklyTactic, body.tactic_id)
+        if original is None or original.user_id != user.id:
+            raise HTTPException(status_code=404, detail="no_tactic")
+        scheduled = await checkins.tactics_for_week(session, user, scorecard.week_start(today))
+        tactic = next((t for t in scheduled if t.id == body.tactic_id), None)
+        if tactic is None:
+            raise HTTPException(status_code=422, detail="not_today")
         n = scorecard.week_number(user.cycle_start, today)
         if n is None or not tactic.in_week(n) or not today_svc.scheduled_on([tactic], today):
             raise HTTPException(status_code=422, detail="not_today")
@@ -674,9 +780,15 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     @app.post("/api/today/week")
     async def mark_week(body: WeekMarkIn, user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         require_step(user, *CHECKIN_STEPS)
-        today = local_today(settings)
+        today = today_for(user)
         week = scorecard.week_start(today)
-        tactic = await own_tactic(session, user, body.tactic_id)
+        original = await session.get(WeeklyTactic, body.tactic_id)
+        if original is None or original.user_id != user.id:
+            raise HTTPException(status_code=404, detail="no_tactic")
+        scheduled = await checkins.tactics_for_week(session, user, scorecard.week_start(today))
+        tactic = next((t for t in scheduled if t.id == body.tactic_id), None)
+        if tactic is None:
+            raise HTTPException(status_code=422, detail="not_this_week")
         if tactic.id not in {t.id for t in await checkins.tactics_for_week(session, user, week)}:
             raise HTTPException(status_code=422, detail="not_this_week")
         require_open_week(user, week)
@@ -706,7 +818,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             week = date.fromisoformat(body.week_start)
         except ValueError:
             raise HTTPException(status_code=422, detail="bad_week") from None
-        if not checkins.can_check_in(user, week, local_today(settings)):
+        if not checkins.can_check_in(user, week, today_for(user)):
             raise HTTPException(status_code=409, detail="week_closed")
         week_tactics = await checkins.tactics_for_week(session, user, week)
         if not week_tactics:
@@ -717,7 +829,9 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
             await checkins.set_mark(session, user, tactic_id, week, done)
         done = sum(1 for v in body.marks.values() if v)
         result = result_payload(done, len(week_tactics))
-        if app.state.bot is not None:
+        if sandbox:
+            user.sandbox_checked_weeks = sorted(set(user.sandbox_checked_weeks or []) | {week.isoformat()})
+        elif app.state.bot is not None:
             try:  # отчёт по флагу send_report — один раз за неделю
                 await send_report(app.state.bot, session, user, week, result["percent"], settings)
             except TelegramAPIError as e:
@@ -729,7 +843,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
     @app.get("/api/scorecard")
     async def get_scorecard(user: User = Depends(current_user), session: AsyncSession = Depends(db)) -> dict:
         require_step(user, *CHECKIN_STEPS)
-        today = local_today(settings)
+        today = today_for(user)
         all_tactics = await checkins.active_tactics(session, user)
         weeks = []
         if user.cycle_start:
@@ -740,23 +854,19 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                     {
                         "n": n,
                         "week_start": week.isoformat(),
-                        "planned": len(tactics.for_week(all_tactics, n)),
+                        "planned": len(await checkins.tactics_for_week(session, user, week)),
                         "percent": value,
                         "level": scorecard.level(value) if value is not None else None,
-                        "future": week > scorecard.week_start(today),
+                        "future": week > scorecard.week_start(today) and not (sandbox and value is not None),
                     }
                 )
         done_total = 0
         if user.cycle_start:
-            done_total = await session.scalar(
-                select(func.count(Checkin.id)).join(WeeklyTactic, WeeklyTactic.id == Checkin.tactic_id).where(
-                    Checkin.user_id == user.id,
-                    WeeklyTactic.is_active,
-                    Checkin.done,
-                    Checkin.week_start >= user.cycle_start,
-                    Checkin.week_start < user.cycle_start + timedelta(days=84),
-                )
-            )
+            for w in weeks:
+                week = date.fromisoformat(w["week_start"])
+                ts = await checkins.tactics_for_week(session, user, week)
+                marks = await checkins.get_marks(session, user, week)
+                done_total += sum(marks.get(t.id) is True for t in ts)
         marked = [w["percent"] for w in weeks if w["percent"] is not None]
         avg = round(sum(marked) / len(marked)) if marked else None
         return {
@@ -779,7 +889,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         user.onboarding_step = OnboardingStep.DONE
         user.onboarding_position = None
         user.is_ready = True
-        user.cycle_start = svc.cycle_start_for(local_today(settings), settings.cycle_start)
+        user.cycle_start = svc.cycle_start_for(today_for(user), settings.cycle_start)
         await session.flush()
         if app.state.bot is not None:
             from bot.handlers.teams import join_team
@@ -806,6 +916,10 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         .replace("/static/app.js", f"/static/app.js?v={version}")
         .replace("/static/style.css", f"/static/style.css?v={version}")
     )
+
+    if sandbox:
+        index_html = index_html.replace('<body>', '<body data-sandbox="true">')
+        index_html = index_html.replace('<body data-sandbox="true">', '<body data-sandbox="true"><aside id="sandbox-panel" style="position:fixed;top:0;left:0;right:0;z-index:999;background:#fff0ce;color:#332200;padding:8px;font-size:13px;text-align:center">ТЕСТОВЫЙ РЕЖИМ · отдельные данные <button id="sandbox-reset">Новый тест</button> <label>Неделя <select id="sandbox-week">' + ''.join(f'<option value="{n}">{n}</option>' for n in range(1,13)) + '</select></label> <button id="sandbox-apply">Перейти</button><span id="sandbox-result" role="status"></span></aside><style>body{padding-top:85px!important}</style>')
 
     @app.get("/")
     async def index() -> HTMLResponse:

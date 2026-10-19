@@ -198,6 +198,11 @@
       <textarea id="prio-title" class="field" rows="2" maxlength="200"></textarea>
       <label class="field-label" for="prio-intent">Зачем это тебе?</label>
       <textarea id="prio-intent" class="field" rows="4" maxlength="2000"></textarea>
+      <div id="prio-replace-box" hidden><label><input type="checkbox" id="prio-replace"> Заменить приоритет на новый</label>
+        <p>Прежняя цель и её действия останутся в истории. При замене создадим новый набор действий.</p></div>
+      <div id="prio-replacement-fields" hidden><label class="field-label" for="prio-first-action">Первое действие нового приоритета — один раз за неделю</label>
+        <textarea id="prio-first-action" class="field" maxlength="200" rows="2"></textarea>
+        <p>Расписание и дополнительные действия можно настроить после сохранения.</p></div>
       <p class="hint-line" id="prio-hint"></p>
     </section>
 
@@ -309,6 +314,7 @@
 
       <!-- после цикла -->
       <p class="muted" id="today-over" hidden>Итоги и старт нового цикла — в чате с ботом.</p>
+      <button class="btn" id="today-over-checkin" hidden>Отметить неделю 12</button>
     </section>
 
     <!-- Вкладка «Прогресс»: как у меня получается? -->
@@ -340,6 +346,7 @@
       <h2>История чек-инов</h2>
       <div class="history" id="progress-history"></div>
       </div>
+      <button class="btn" id="first-week-checkin">Заполнить первую неделю</button>
       <!-- Моя команда: только проценты за неделю, как /team в чате -->
       <div class="card team-card" id="team-card" hidden>
         <b id="team-title"></b>

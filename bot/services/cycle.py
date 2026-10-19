@@ -59,30 +59,10 @@ class CycleStats:
 
 async def cycle_stats(session: AsyncSession, user: User) -> CycleStats:
     """% по неделям цикла. Запланировано = тактики текущего цикла (они активны, пока не начат новый)."""
-    tactics = await checkins.active_tactics(session, user)
-    tactic_ids = {t.id for t in tactics}
-    weeks: list[int | None] = [None] * scorecard.CYCLE_WEEKS
-    if user.cycle_start is None or not tactics:
-        return CycleStats(weeks)
-    rows = await session.scalars(
-        select(Checkin).where(
-            Checkin.user_id == user.id,
-            Checkin.week_start >= user.cycle_start,
-            Checkin.week_start < cycle_end(user),
-        )
-    )
-    done_by_week: dict[int, int] = {}
-    marked_weeks: set[int] = set()
-    for row in rows:
-        if row.tactic_id not in tactic_ids:
-            continue
-        n = (row.week_start - user.cycle_start).days // 7
-        marked_weeks.add(n)
-        done_by_week[n] = done_by_week.get(n, 0) + int(row.done)
-    for n in marked_weeks:
-        planned = sum(1 for t in tactics if t.in_week(n + 1))
-        weeks[n] = scorecard.percent(done_by_week.get(n, 0), planned)
-    return CycleStats(weeks)
+    if not user.cycle_start:
+        return CycleStats([None] * scorecard.CYCLE_WEEKS)
+    return CycleStats([await scorecard.week_percent(session, user, user.cycle_start + timedelta(weeks=n))
+                       for n in range(scorecard.CYCLE_WEEKS)])
 
 
 async def previous_priorities(session: AsyncSession, user: User) -> list[Priority]:
@@ -115,16 +95,14 @@ async def wheel_comparison(session: AsyncSession, user: User) -> list[tuple[whee
     return [(s, before[s.key], v) for s, v in wheel.ordered_scores(now) if s.key in before]
 
 
-# План (цели, «зачем», действия, расписание) можно менять до старта и в первые 3 календарных дня цикла
-# по местному времени: старт 05.10 → правки до 07.10 включительно, с 08.10 план закрыт. Видение — всегда.
-PLAN_EDIT_GRACE_DAYS = 3
+# План можно менять до старта и в течение цикла; прошлые недели защищены снимками.
 
 
 def plan_edit_until(user: User) -> date | None:
     """Последний день, когда подтверждённый план ещё можно менять (включительно)."""
     if user.onboarding_step != OnboardingStep.DONE or user.cycle_start is None:
         return None
-    return user.cycle_start + timedelta(days=PLAN_EDIT_GRACE_DAYS - 1)
+    return user.cycle_start + timedelta(days=CYCLE_DAYS - 1)
 
 
 def plan_editable(user: User, today: date) -> bool:

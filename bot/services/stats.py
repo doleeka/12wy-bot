@@ -58,9 +58,7 @@ async def _week_state(session: AsyncSession, user: User, week: date) -> str:
 async def week_stats(session: AsyncSession, week: date) -> WeekStats:
     stats = WeekStats(week=week)
     users = list(await session.scalars(
-        select(User)
-        .where(User.onboarding_step.in_([OnboardingStep.DONE, OnboardingStep.FINISHED]), User.excluded_at.is_(None))
-        .order_by(User.id)
+        select(User).where(User.onboarding_step.in_([OnboardingStep.DONE, OnboardingStep.FINISHED])).order_by(User.id)
     ))
     state: dict[int, str] = {}
     for user in users:

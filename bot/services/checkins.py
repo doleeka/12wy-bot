@@ -26,8 +26,12 @@ async def active_tactics(session: AsyncSession, user: User) -> list[WeeklyTactic
 
 async def tactics_for_week(session: AsyncSession, user: User, week: date) -> list[WeeklyTactic]:
     """Тактики, которые по плану выпадают на неделю week (понедельник)."""
-    tactics = await active_tactics(session, user)
+    from bot.services import plan_history
     n = checkin_week_number(user, week)
+    saved = await plan_history.snapshot(session, user, n) if n else None
+    if saved:
+        return plan_history.thaw(saved.plan, user, n)
+    tactics = await active_tactics(session, user)
     return [t for t in tactics if n is not None and t.in_week(n)]
 
 
@@ -46,12 +50,11 @@ def checkin_week_number(user: User, week: date) -> int | None:
 
 
 def default_week(user: User, today: date) -> date:
-    """Текущая неделя. Прошлая — если за неё ещё нет отчёта и сегодня понедельник
-    или текущая неделя уже вне цикла (13-я неделя: 12-ю можно отметить в любой день)."""
+    """В понедельник и вторник предложить незавершённую прошлую неделю."""
     this_week = scorecard.week_start(today)
     prev_week = this_week - timedelta(days=7)
     if (
-        (today.weekday() == 0 or checkin_week_number(user, this_week) is None)
+        today.weekday() <= 1
         and checkin_week_number(user, prev_week) is not None
         and (user.last_reported_week is None or user.last_reported_week < prev_week)
     ):
@@ -64,14 +67,17 @@ def can_check_in(user: User, week: date, today: date) -> bool:
         # FINISHED — чтобы в понедельник 13-й недели ещё можно было отметить 12-ю
         user.onboarding_step in (OnboardingStep.DONE, OnboardingStep.FINISHED)
         and checkin_week_number(user, week) is not None
-        and week <= scorecard.week_start(today)
+        and week.weekday() == 0
+        and week <= today
+        and (checkin_week_number(user, week) == 1 or today <= week + timedelta(days=8))
     )
 
 
 async def set_mark(session: AsyncSession, user: User, tactic_id: int, week: date, done: bool) -> bool:
     """Отмечает тактику за неделю. False — если тактика не её или неактивна."""
     tactic = await session.get(WeeklyTactic, tactic_id)
-    if tactic is None or tactic.user_id != user.id or not tactic.is_active:
+    allowed = {t.id for t in await tactics_for_week(session, user, week)}
+    if tactic is None or tactic.user_id != user.id or tactic_id not in allowed:
         return False
     # upsert, а не «прочитать → вставить»: двойное нажатие шлёт два запроса сразу, второй не должен падать на UNIQUE
     await session.execute(
@@ -92,9 +98,7 @@ def summarize(tactics: list[WeeklyTactic], marks: dict[int, bool]) -> tuple[int,
 
 async def users_for_checkin(session: AsyncSession, week: date) -> list[User]:
     """Готовые участницы, у которых неделя week входит в цикл и отчёт за неё ещё не отправлен."""
-    rows = await session.scalars(
-        select(User).where(User.onboarding_step == OnboardingStep.DONE, User.excluded_at.is_(None)).order_by(User.id)
-    )
+    rows = await session.scalars(select(User).where(User.onboarding_step == OnboardingStep.DONE).order_by(User.id))
     return [
         u
         for u in rows

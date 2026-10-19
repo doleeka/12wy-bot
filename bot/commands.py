@@ -28,8 +28,9 @@ PARTICIPANT_COMMANDS = [
     BotCommand(command="help", description="Что умеет бот"),
 ]
 ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
-    BotCommand(command="remove", description="Админ: исключить из сообщества (тихо, обратимо)"),
-    BotCommand(command="restore", description="Админ: вернуть исключённых / список"),
+    BotCommand(command="myapp", description="Мои личные цели и прогресс"),
+    BotCommand(command="testapp", description="Тестовая версия — отдельные данные"),
+    BotCommand(command="admin", description="Управление сообществом"),
     BotCommand(command="broadcast", description="Админ: сообщение всем (с предпросмотром)"),
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),
     BotCommand(command="teams", description="Админ: все команды"),
@@ -37,8 +38,8 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="moveteam", description="Админ: перевести в команду"),
     BotCommand(command="report", description="Админ: куда слать отчёт"),
     BotCommand(command="backup", description="Админ: бэкап базы"),
-    BotCommand(command="resetme", description="Админ: пройти онбординг заново"),
-    BotCommand(command="testcycle", description="Админ: проверить цикл (будто идёт неделя N)"),
+    BotCommand(command="resetme", description="Тест: как начать заново"),
+    BotCommand(command="testcycle", description="Тест: сменить неделю в тестовом профиле"),
     BotCommand(command="unlinkteam", description="Админ: отвязать чат команды"),
 ]
 GROUP_COMMANDS = [

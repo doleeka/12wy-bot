@@ -42,7 +42,8 @@ async def join_team(
         await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))) + chat_line(existing))
         return existing
     if user.no_team:  # организатор вне команд
-        await message.answer(texts.TEAM_NONE_ORGANIZER)
+        await message.answer(texts.TEAM_NONE_ORGANIZER if settings and user.telegram_id in settings.admin_ids
+                             else "Ты проходишь цикл самостоятельно и остаёшься частью сообщества. Твой план и прогресс сохраняются.")
         return None
     team, created = await teams.assign_to_team(session, user)
     members = await teams.team_members(session, team.id)
@@ -151,15 +152,36 @@ async def cmd_moveteam(
     message: Message, command: CommandObject, session: AsyncSession, bot: Bot, settings: Settings | None = None
 ) -> None:
     args = (command.args or "").split()
-    if len(args) != 2 or not args[0].lstrip("-").isdigit() or not (args[1].isdigit() or args[1].lower() == "new"):
+    if len(args) != 2 or not args[0].lstrip("-").isdigit() or not (args[1].isdigit() or args[1].lower() in {"new", "none", "off"}):
         await message.answer(texts.ADMIN_MOVE_USAGE)
         return
     tg_id = int(args[0])
-    team_id = None if args[1].lower() == "new" else int(args[1])
+    destination = args[1].lower()
+    team_id = int(destination) if destination.isdigit() else None
 
     user = await teams.get_user_by_telegram_id(session, tg_id)
     if user is None:
         await message.answer(texts.ADMIN_USER_NOT_FOUND.format(tg_id=tg_id))
+        return
+    if destination in {"none", "off"}:
+        was_independent = user.no_team
+        user.no_team = True
+        old_team = await teams.leave_team(session, user)
+        await session.commit()
+        old = escape(teams.team_name(old_team)) if old_team else "уже проходила самостоятельно"
+        await message.answer(
+            f"Готово: {display_name(user)} проходит самостоятельно (было: {old}).\n"
+            "План, отметки и история сохранены. Автораспределение отключено.\n"
+            "Вернуть в команду: /moveteam " + str(tg_id) + " &lt;номер команды&gt;\n"
+            "Состав чата Telegram не изменён; при необходимости измени его вручную."
+        )
+        if old_team is not None or not was_independent:
+            delivered = await safe_send(bot, user.telegram_id, texts.TEAM_NOW_INDEPENDENT)
+            if not delivered:
+                await message.answer(texts.ADMIN_MOVE_NOTIFY_FAILED.format(name=display_name(user)))
+            if old_team is not None:
+                await notify_team(bot, session, old_team,
+                                  texts.TEAM_MEMBER_INDEPENDENT.format(name=display_name(user)), settings)
         return
     if not user.is_ready:
         await message.answer(texts.ADMIN_USER_NOT_READY.format(name=display_name(user)))
@@ -180,11 +202,13 @@ async def cmd_moveteam(
         return
 
     members = await teams.team_members(session, new_team.id)
-    await safe_send(
+    delivered = await safe_send(
         bot,
         user.telegram_id,
         texts.TEAM_MOVED.format(team=escape(new_name), mates=_mates_text(user, members)) + chat_line(new_team),
     )
+    if not delivered:
+        await message.answer(texts.ADMIN_MOVE_NOTIFY_FAILED.format(name=display_name(user)))
     await notify_team(
         bot,
         session,

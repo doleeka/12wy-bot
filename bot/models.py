@@ -82,10 +82,9 @@ class User(Base):
     # Режим проверки (/testcycle) включён с этого момента (UTC) — по нему отделяем тестовые отметки
     test_mode_since: Mapped[datetime | None] = mapped_column(DateTime)
     # Организатор вне команд: не распределяется ни в одну тройку (/noteam)
+    sandbox_week: Mapped[int | None] = mapped_column(Integer)
+    sandbox_checked_weeks: Mapped[list | None] = mapped_column(JSON)
     no_team: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # Исключён админом из сообщества (/remove): ничего не получает, не считается, приложение закрыто.
-    # Данные не удаляются — /restore возвращает
-    excluded_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -314,3 +313,26 @@ class TeamMember(Base):
 
     team: Mapped[Team] = relationship(back_populates="members")
     user: Mapped[User] = relationship(back_populates="team_membership")
+
+
+class PlanWeekSnapshot(Base):
+    """Immutable plan used for a week; marks keep their original tactic IDs."""
+    __tablename__ = "plan_week_snapshots"
+    __table_args__ = (UniqueConstraint("user_id", "cycle", "week_number"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    cycle: Mapped[int] = mapped_column(Integer)
+    week_number: Mapped[int] = mapped_column(Integer)
+    plan: Mapped[list] = mapped_column(JSON)
+
+
+class PlanChange(Base):
+    __tablename__ = "plan_changes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    cycle: Mapped[int] = mapped_column(Integer)
+    effective_week: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(64))
+    plan_before: Mapped[list] = mapped_column(JSON)
+    marks_before: Mapped[list] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
