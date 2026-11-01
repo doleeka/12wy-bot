@@ -239,6 +239,7 @@ ADMIN_DIGEST = (
 ADMIN_DIGEST_MISSING = " · не отметили: {n}"
 ADMIN_DIGEST_BUFFER = "\nНеделя-буфер (действий по плану нет): {n}"
 ADMIN_DIGEST_TEAM = "• {team}: {checked} из {total}"
+ADMIN_DIGEST_SOLO = "\n\n<b>Самостоятельно</b> (без тройки) — сделали чек-ин: {checked} из {total}"
 ADMIN_DIGEST_NO_TEAMS = "• команд пока нет"
 ADMIN_DIGEST_EMPTY = "📊 <b>{title}</b> · {period}\n\nВ эту неделю ни у кого не шёл цикл — считать нечего."
 ADMIN_DIGEST_TITLE_DONE = "Итоги недели {n}"
@@ -261,6 +262,7 @@ ADMIN_TEAMS_EMPTY = "Команд пока нет."
 ADMIN_TEAMS_ROW = "<b>{team}</b> (id {id}, {count}/3):\n{members}"
 ADMIN_TEAMS_MEMBER = "   • {name} — <code>{tg_id}</code>"
 ADMIN_TEAMS_UNASSIGNED = "<b>Готовы, но без команды:</b>\n{members}"
+ADMIN_TEAMS_SOLO = "<b>Самостоятельно — только приложение, без тройки ({count}):</b>\n{members}"
 
 
 # ---------- Чек-ин ----------
@@ -416,7 +418,9 @@ HELP = (
 HELP_ADMIN = (
     "\n\n<b>Для админа</b>\n"
     "/teams — все команды и telegram_id участниц\n"
-    "/moveteam &lt;telegram_id&gt; &lt;team_id|new&gt; — перевести в другую команду\n"
+    "/moveteam &lt;telegram_id&gt; &lt;team_id|new|none&gt; — перевести в другую команду\n"
+    "/solo — кто проходит самостоятельно; /solo @ник — перевести на «только приложение, без тройки»\n"
+    "/unsolo @ник — вернуть в распределение по тройкам\n"
     "/report &lt;telegram_id&gt; [team|admin|none] — куда слать отчёт участницы\n"
     "/backup — прислать бэкап базы сейчас\n"
     "/myapp — личные цели и прогресс\n/testapp — тестовая версия с отдельными данными\n/admin — управление сообществом\n/resetme — как начать новый тест\n"
@@ -470,3 +474,26 @@ TEAM_NOW_INDEPENDENT = (
 )
 TEAM_MEMBER_INDEPENDENT = "{name} теперь проходит цикл самостоятельно и остаётся частью сообщества."
 ADMIN_MOVE_NOTIFY_FAILED = "Изменение сохранено, но уведомление для {name} не доставлено. Возможно, бот заблокирован — свяжись с участницей лично."
+
+SOLO_USAGE = (
+    "Самостоятельное прохождение — только приложение, без тройки.\n\n"
+    "<code>/solo @ник</code>, <code>/solo telegram_id</code> или <code>/solo Имя</code> — перевести.\n"
+    "<code>/solo</code> — список. Вернуть в тройку: <code>/unsolo @ник</code>"
+)
+SOLO_LIST = "Проходят самостоятельно — только приложение, без тройки ({count}):\n{rows}\n\nВернуть в тройку: <code>/unsolo id</code>"
+SOLO_NONE = "Сейчас все участницы — в тройках. Перевести на самостоятельное: <code>/solo @ник</code>"
+SOLO_MANY = "По «{q}» нашлось несколько:\n{rows}\n\nУточни: <code>/{cmd} id</code>."
+SOLO_ADMIN = "Себя переводи через /noteam — это режим организатора."
+SOLO_EXCLUDED = "{who} исключён(а) из сообщества — сначала /restore."
+SOLO_ALREADY = "{who} уже проходит самостоятельно. Вернуть в тройку: <code>/unsolo {tg_id}</code>"
+SOLO_DONE = (
+    "Готово: {who} проходит самостоятельно — только приложение, без тройки (было: {old}).\n"
+    "Личные напоминания о чек-ине и плане приходят как прежде; командных сообщений нет. "
+    "План, отметки и история сохранены.\n"
+    "Вернуть в тройку: <code>/unsolo {tg_id}</code>"
+)
+SOLO_WAS_ALONE = "без команды"
+SOLO_CHAT_REMOVED = "\nИз группового чата «{team}» бот её убрал."
+UNSOLO_NOT_SOLO = "{who} и так в распределении по тройкам — ничего не меняю."
+UNSOLO_DONE = "Готово: {who} снова в тройке → {team}{new}."
+UNSOLO_LATER = "Готово: {who} снова в распределении — попадёт в тройку, когда закончит онбординг."

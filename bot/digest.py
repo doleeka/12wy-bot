@@ -35,6 +35,8 @@ def digest_text(stats: WeekStats, settings: Settings | None, running: bool = Fal
     teams = "\n".join(
         texts.ADMIN_DIGEST_TEAM.format(team=escape(t.name), checked=t.checked, total=t.total) for t in stats.teams
     ) or texts.ADMIN_DIGEST_NO_TEAMS
+    if stats.solo:
+        teams += texts.ADMIN_DIGEST_SOLO.format(checked=stats.solo.checked, total=stats.solo.total)
     text = texts.ADMIN_DIGEST.format(
         title=title,
         period=period(stats.week),

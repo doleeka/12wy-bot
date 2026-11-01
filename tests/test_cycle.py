@@ -84,7 +84,11 @@ async def test_new_cycle_resets_but_keeps_team(sessionmaker):
 
 # ---------- сценарий ----------
 
-async def test_summary_pause_and_newcycle(sessionmaker):
+async def test_summary_pause_and_newcycle(sessionmaker, monkeypatch):
+    # «Сегодня» — понедельник 13-й недели: 12-ю ещё можно отметить (до вторника), в другие дни подсказки нет
+    import bot.handlers.checkin, bot.handlers.cycle, bot.handlers.start
+    for mod in (bot.handlers.checkin, bot.handlers.cycle, bot.handlers.start):
+        monkeypatch.setattr(mod, "local_today", lambda _s=None: THIS_WEEK)
     await make_user(sessionmaker, 1, cycle_start=FINISHED_START)
     await add_checkins(sessionmaker, 1, {n: 4 for n in range(1, 12)})  # 12-я неделя не отмечена
 

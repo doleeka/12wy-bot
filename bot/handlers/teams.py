@@ -1,4 +1,4 @@
-"""Команды: автораспределение после онбординга, /team, админские /teams и /moveteam."""
+"""Команды: автораспределение после онбординга, /team, админские /teams, /moveteam, /solo и /unsolo."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -15,7 +15,7 @@ from bot.filters import IsAdmin
 from bot.models import OnboardingStep, Team, User
 from bot.notify import display_name, safe_send
 from bot.team_notify import chat_line, notify_team, remove_from_chat
-from bot.services import scorecard, teams
+from bot.services import members as members_svc, scorecard, teams
 from bot.services.users import get_or_create_user
 
 router = Router(name="teams")
@@ -121,7 +121,7 @@ async def team_rows(session: AsyncSession, team: Team, today, viewer: User | Non
 # ---------- админ ----------
 
 @router.message(Command("teams"), IsAdmin())
-async def cmd_teams(message: Message, session: AsyncSession) -> None:
+async def cmd_teams(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
     blocks = []
     for team, members in await teams.list_teams(session):
         member_lines = "\n".join(
@@ -144,7 +144,32 @@ async def cmd_teams(message: Message, session: AsyncSession) -> None:
                 )
             )
         )
+    solo = [u for u in await teams.list_solo(session) if not settings or u.telegram_id not in settings.admin_ids]
+    if solo:
+        blocks.append(texts.ADMIN_TEAMS_SOLO.format(count=len(solo), members="\n".join(
+            texts.ADMIN_TEAMS_MEMBER.format(name=display_name(u), tg_id=u.telegram_id) for u in solo
+        )))
     await message.answer("\n\n".join(blocks) or texts.ADMIN_TEAMS_EMPTY)
+
+
+async def make_solo(bot: Bot, session: AsyncSession, user: User, settings: Settings | None) -> tuple[Team | None, bool, bool]:
+    """Самостоятельное прохождение: выйти из тройки и не попадать в распределение.
+
+    Ей — одно сообщение, что всё сохранено; прежней тройке — что она теперь сама; из чата тройки убираем,
+    чтобы не видела чужие отчёты. Возвращает (прежняя команда, доставлено ли ей, убрана ли из чата).
+    """
+    was_solo = user.no_team
+    user.no_team = True
+    old_team = await teams.leave_team(session, user)
+    await session.commit()
+    delivered = removed = True
+    if old_team is not None or not was_solo:
+        delivered = await safe_send(bot, user.telegram_id, texts.TEAM_NOW_INDEPENDENT)
+    if old_team is not None:
+        await notify_team(bot, session, old_team, texts.TEAM_MEMBER_INDEPENDENT.format(name=display_name(user)), settings)
+        if old_team.chat_id:
+            removed = await remove_from_chat(bot, old_team.chat_id, user.telegram_id)
+    return old_team, delivered, removed
 
 
 @router.message(Command("moveteam"), IsAdmin())
@@ -164,24 +189,7 @@ async def cmd_moveteam(
         await message.answer(texts.ADMIN_USER_NOT_FOUND.format(tg_id=tg_id))
         return
     if destination in {"none", "off"}:
-        was_independent = user.no_team
-        user.no_team = True
-        old_team = await teams.leave_team(session, user)
-        await session.commit()
-        old = escape(teams.team_name(old_team)) if old_team else "уже проходила самостоятельно"
-        await message.answer(
-            f"Готово: {display_name(user)} проходит самостоятельно (было: {old}).\n"
-            "План, отметки и история сохранены. Автораспределение отключено.\n"
-            "Вернуть в команду: /moveteam " + str(tg_id) + " &lt;номер команды&gt;\n"
-            "Состав чата Telegram не изменён; при необходимости измени его вручную."
-        )
-        if old_team is not None or not was_independent:
-            delivered = await safe_send(bot, user.telegram_id, texts.TEAM_NOW_INDEPENDENT)
-            if not delivered:
-                await message.answer(texts.ADMIN_MOVE_NOTIFY_FAILED.format(name=display_name(user)))
-            if old_team is not None:
-                await notify_team(bot, session, old_team,
-                                  texts.TEAM_MEMBER_INDEPENDENT.format(name=display_name(user)), settings)
+        await _report_solo(message, user, *await make_solo(bot, session, user, settings))
         return
     if not user.is_ready:
         await message.answer(texts.ADMIN_USER_NOT_READY.format(name=display_name(user)))
@@ -224,6 +232,89 @@ async def cmd_moveteam(
             await message.answer(texts.ADMIN_KICK_FAILED.format(name=display_name(user)))
 
 
+async def _report_solo(message: Message, user: User, old_team: Team | None, delivered: bool, removed: bool) -> None:
+    old = escape(teams.team_name(old_team)) if old_team else texts.SOLO_WAS_ALONE
+    text = texts.SOLO_DONE.format(who=display_name(user), old=old, tg_id=user.telegram_id)
+    if old_team is not None and old_team.chat_id and removed:
+        text += texts.SOLO_CHAT_REMOVED.format(team=escape(teams.team_name(old_team)))
+    await message.answer(text)
+    if not delivered:
+        await message.answer(texts.ADMIN_MOVE_NOTIFY_FAILED.format(name=display_name(user)))
+    if not removed:
+        await message.answer(texts.ADMIN_KICK_FAILED.format(name=display_name(user)))
+
+
+def _row(u: User) -> str:
+    return texts.ADMIN_TEAMS_MEMBER.format(name=display_name(u), tg_id=u.telegram_id)
+
+
+async def _find_one(message: Message, session: AsyncSession, q: str, cmd: str) -> User | None:
+    found = await members_svc.find_users(session, q)
+    if not found:
+        await message.answer(texts.REMOVE_NOT_FOUND.format(q=escape(q)))
+    elif len(found) > 1:
+        await message.answer(texts.SOLO_MANY.format(q=escape(q), rows="\n".join(_row(u) for u in found), cmd=cmd))
+    else:
+        return found[0]
+    return None
+
+
+@router.message(Command("solo"), IsAdmin())
+async def cmd_solo(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
+                   settings: Settings | None = None) -> None:
+    """Только приложение, без тройки: /solo — список, /solo @ник|id|Имя — перевести."""
+    q = (command.args or "").strip()
+    if not q:
+        solo = [u for u in await teams.list_solo(session) if not settings or u.telegram_id not in settings.admin_ids]
+        await message.answer(texts.SOLO_LIST.format(count=len(solo), rows="\n".join(_row(u) for u in solo))
+                             if solo else texts.SOLO_NONE + "\n\n" + texts.SOLO_USAGE)
+        return
+    user = await _find_one(message, session, q, "solo")
+    if user is None:
+        return
+    if settings and user.telegram_id in settings.admin_ids:
+        await message.answer(texts.SOLO_ADMIN)
+    elif user.excluded_at is not None:
+        await message.answer(texts.SOLO_EXCLUDED.format(who=display_name(user)))
+    elif user.no_team:
+        await message.answer(texts.SOLO_ALREADY.format(who=display_name(user), tg_id=user.telegram_id))
+    else:
+        await _report_solo(message, user, *await make_solo(bot, session, user, settings))
+
+
+@router.message(Command("unsolo"), IsAdmin())
+async def cmd_unsolo(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
+                     settings: Settings | None = None) -> None:
+    """Вернуть в распределение по тройкам; если онбординг пройден — сразу в тройку со свободным местом."""
+    q = (command.args or "").strip()
+    if not q:
+        await message.answer(texts.SOLO_USAGE)
+        return
+    user = await _find_one(message, session, q, "unsolo")
+    if user is None:
+        return
+    if user.excluded_at is not None:
+        await message.answer(texts.SOLO_EXCLUDED.format(who=display_name(user)))
+        return
+    if not user.no_team:
+        await message.answer(texts.UNSOLO_NOT_SOLO.format(who=display_name(user)))
+        return
+    user.no_team = False
+    await session.commit()
+    if not user.is_ready:
+        await message.answer(texts.UNSOLO_LATER.format(who=display_name(user)))
+        return
+    team, created = await teams.assign_to_team(session, user)
+    name = escape(teams.team_name(team))
+    await message.answer(texts.UNSOLO_DONE.format(who=display_name(user), team=name, new=" (новая команда)" if created else ""))
+    members = await teams.team_members(session, team.id)
+    if not await safe_send(bot, user.telegram_id,
+                           texts.TEAM_MOVED.format(team=name, mates=_mates_text(user, members)) + chat_line(team)):
+        await message.answer(texts.ADMIN_MOVE_NOTIFY_FAILED.format(name=display_name(user)))
+    await notify_team(bot, session, team, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)),
+                      settings, exclude=user)
+
+
 @router.message(Command("unlinkteam"), IsAdmin())
 async def cmd_unlinkteam(message: Message, command: CommandObject, session: AsyncSession) -> None:
     arg = (command.args or "").strip()
@@ -238,6 +329,6 @@ async def cmd_unlinkteam(message: Message, command: CommandObject, session: Asyn
     await message.answer(texts.ADMIN_UNLINKED.format(team=escape(teams.team_name(team))))
 
 
-@router.message(Command("teams", "moveteam", "unlinkteam"))
+@router.message(Command("teams", "moveteam", "unlinkteam", "solo", "unsolo"))
 async def admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)

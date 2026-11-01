@@ -27,6 +27,7 @@ class WeekStats:
     buffer: int = 0                    # неделя без действий по плану — чек-ин не нужен
     no_gaps: int = 0                   # отмечают все свои недели без пропусков
     teams: list[TeamCount] = field(default_factory=list)
+    solo: TeamCount | None = None      # самостоятельно — только приложение, без тройки
 
     @property
     def missing(self) -> int:
@@ -81,4 +82,7 @@ async def week_stats(session: AsyncSession, week: date) -> WeekStats:
         counted = [m for m in members if state.get(m.id) in ("done", "missing")]
         if counted:
             stats.teams.append(TeamCount(teams.team_name(team), sum(state[m.id] == "done" for m in counted), len(counted)))
+    solo = [u for u in users if u.no_team and state[u.id] in ("done", "missing")]
+    if solo:
+        stats.solo = TeamCount("Самостоятельно", sum(state[u.id] == "done" for u in solo), len(solo))
     return stats

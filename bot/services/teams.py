@@ -124,13 +124,21 @@ async def list_teams(session: AsyncSession) -> list[tuple[Team, list[User]]]:
 
 
 async def ready_without_team(session: AsyncSession) -> list[User]:
+    """Готовы, но ни в какой команде — и не на самостоятельном прохождении (их показываем отдельно)."""
     rows = await session.scalars(
         select(User)
         .outerjoin(TeamMember, TeamMember.user_id == User.id)
-        .where(User.is_ready, TeamMember.id.is_(None), User.excluded_at.is_(None))
+        .where(User.is_ready, TeamMember.id.is_(None), User.excluded_at.is_(None), User.no_team.is_(False))
         .order_by(User.id)
     )
     return list(rows)
+
+
+async def list_solo(session: AsyncSession) -> list[User]:
+    """Проходят самостоятельно — только приложение, без тройки (no_team)."""
+    return list(await session.scalars(
+        select(User).where(User.no_team.is_(True), User.excluded_at.is_(None)).order_by(User.id)
+    ))
 
 
 # ---------- групповой чат команды ----------
