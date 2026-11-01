@@ -9,6 +9,11 @@ on:
       - main
       - claude/telegram-bot-12-week-year-7ssgo7
   workflow_dispatch: # кнопка «Run workflow» во вкладке Actions — выкатить вручную
+    inputs:
+      skip_live_check:
+        description: "Не сверять код на сервере с git (только если проверка сама сломалась)"
+        type: boolean
+        default: false
 
 # Один деплой за раз: новый пуш ждёт, пока закончится предыдущий
 concurrency:
@@ -32,7 +37,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      # 19.10 сервер работал на коде, выкаченном мимо git, и выкатка из git его сломала (миграции разошлись).
+      # Поэтому сначала сверяем: код на сервере должен совпадать с каким-то коммитом этой ветки.
+      # Если нет — ничего не выкатываем: сначала выгрузите код с сервера (Export image source to a branch).
+      - name: Check the server runs code that is in git
+        if: ${{ !inputs.skip_live_check }}
+        run: |
+          image=$(flyctl machine list --json | jq -r '[.[] | .config.image] | map(select(. != null)) | first')
+          echo "Running image: $image"
+          test -n "$image" -a "$image" != null
+          flyctl auth docker
+          docker pull -q "$image"
+          cid=$(docker create "$image")
+          mkdir -p /tmp/live && docker cp "$cid:/app/." /tmp/live/ && docker rm "$cid" >/dev/null
+          find /tmp/live -name __pycache__ -type d -prune -exec rm -rf {} +
+          paths="bot webapp alembic.ini requirements.txt"
+          live=$(cd /tmp/live && git init -q && git add -A $paths && git write-tree)
+          sig() { for p in $paths; do git -C "$1" rev-parse "$2:$p" 2>/dev/null || echo none; done | tr '\n' ' '; }
+          want=$(sig /tmp/live "$live")
+          for c in $(git rev-list -n 300 HEAD); do
+            if [ "$(sig . "$c")" = "$want" ]; then
+              echo "Server code = commit $c — safe to deploy"; exit 0
+            fi
+          done
+          echo "::error::На сервере код, которого нет в истории этой ветки (выкатывали мимо GitHub?). Выкатка остановлена, сервер не тронут."
+          exit 1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       # --ha=false: ровно одна машина (две одновременно опрашивали бы Telegram и имели бы разные базы)
       - run: flyctl deploy --remote-only --ha=false
         env:
