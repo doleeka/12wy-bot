@@ -41,9 +41,14 @@ async def join_team(
     if existing is not None:
         await message.answer(texts.TEAM_KEPT.format(team=escape(teams.team_name(existing))) + chat_line(existing))
         return existing
-    if user.no_team:  # организатор вне команд
-        await message.answer(texts.TEAM_NONE_ORGANIZER if settings and user.telegram_id in settings.admin_ids
-                             else "Ты проходишь цикл самостоятельно и остаёшься частью сообщества. Твой план и прогресс сохраняются.")
+    if user.no_team:  # организатор вне команд или самостоятельное прохождение
+        if settings and user.telegram_id in settings.admin_ids:
+            await message.answer(texts.TEAM_NONE_ORGANIZER)
+            return None
+        await message.answer("Ты проходишь цикл самостоятельно и остаёшься частью сообщества. Твой план и прогресс сохраняются.")
+        for admin_id in settings.admin_ids if settings else []:
+            await safe_send(bot, admin_id, texts.ADMIN_USER_READY.format(
+                name=display_name(user), tg_id=user.telegram_id, team=texts.SOLO_TEAM_LABEL, new=""))
         return None
     team, created = await teams.assign_to_team(session, user)
     members = await teams.team_members(session, team.id)
@@ -259,6 +264,11 @@ async def _find_one(message: Message, session: AsyncSession, q: str, cmd: str) -
     return None
 
 
+async def solo_link(bot: Bot) -> str:
+    from bot.handlers.start import SOLO_START
+    return f"https://t.me/{(await bot.me()).username}?start={SOLO_START}"
+
+
 @router.message(Command("solo"), IsAdmin())
 async def cmd_solo(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
                    settings: Settings | None = None) -> None:
@@ -266,8 +276,9 @@ async def cmd_solo(message: Message, command: CommandObject, session: AsyncSessi
     q = (command.args or "").strip()
     if not q:
         solo = [u for u in await teams.list_solo(session) if not settings or u.telegram_id not in settings.admin_ids]
-        await message.answer(texts.SOLO_LIST.format(count=len(solo), rows="\n".join(_row(u) for u in solo))
-                             if solo else texts.SOLO_NONE + "\n\n" + texts.SOLO_USAGE)
+        link = texts.SOLO_LINK.format(link=await solo_link(bot))
+        await message.answer((texts.SOLO_LIST.format(count=len(solo), rows="\n".join(_row(u) for u in solo))
+                              if solo else texts.SOLO_NONE + "\n\n" + texts.SOLO_USAGE) + "\n\n" + link)
         return
     user = await _find_one(message, session, q, "solo")
     if user is None:

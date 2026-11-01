@@ -133,3 +133,50 @@ async def test_digest_counts_solo_separately(sessionmaker, tg):  # noqa: F811
     assert sum(t.total for t in s.teams) + s.solo.total == s.participants
     text = digest_text(s, None)
     assert "Самостоятельно</b> (без тройки) — сделали чек-ин: 1 из 1" in text and "Дана" not in text
+
+
+# ---------- ссылка «без тройки» для новых: t.me/<бот>?start=solo ----------
+
+async def test_solo_link_for_newcomers(sessionmaker, tg):  # noqa: F811
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from bot.handlers.teams import join_team
+    from bot.models import OnboardingStep
+
+    await community(sessionmaker)
+    await send(tg, "/solo", ADMIN_ID, "private", ADMIN_ID)
+    assert "https://t.me/twelve_wy_bot?start=solo" in tg[2].sent(ADMIN_ID)[-1]
+
+    tg[2].calls.clear()
+    await send(tg, "/start solo", 7, "private", 7)  # новенькая по ссылке
+    u, team = await user(sessionmaker, 7)
+    assert u.no_team and team is None
+    welcome = tg[2].sent(7)[0]
+    assert "самостоятельно" in welcome and "маленькая команда" not in welcome
+    assert "по ссылке «без тройки»" in tg[2].sent(ADMIN_ID)[-1] and "/unsolo 7" in tg[2].sent(ADMIN_ID)[-1]
+
+    # закончила онбординг — в тройку не попала; ей — что проходит сама, админу — «→ самостоятельно»
+    tg[2].calls.clear()
+    async with sessionmaker() as session:
+        u = await teams.get_user_by_telegram_id(session, 7)
+        u.onboarding_step, u.is_ready = OnboardingStep.DONE, True
+        msg = SimpleNamespace(answer=AsyncMock())
+        assert await join_team(msg, tg[1], session, u, tg[0]["settings"]) is None
+        await session.commit()
+    assert "самостоятельно" in msg.answer.call_args.args[0]
+    assert "самостоятельно, без тройки" in tg[2].sent(ADMIN_ID)[-1]
+    assert (await user(sessionmaker, 7))[1] is None
+    await send(tg, "/teams", ADMIN_ID, "private", ADMIN_ID)
+    assert "U7" in tg[2].sent(ADMIN_ID)[-1].split("Самостоятельно")[1]
+
+
+async def test_solo_link_does_not_move_trio_members(sessionmaker, tg):  # noqa: F811
+    await community(sessionmaker)
+    tg[2].calls.clear()
+    await send(tg, "/start solo", 1, "private", 1)  # Арман уже в тройке — ссылка его не двигает
+    arman, team = await user(sessionmaker, 1)
+    assert not arman.no_team and team is not None
+    assert not tg[2].sent(ADMIN_ID)
+    # обычный /start новенькой — как раньше, с командой
+    await send(tg, "/start", 8, "private", 8)
+    assert not (await user(sessionmaker, 8))[0].no_team and "маленькая команда" in tg[2].sent(8)[0]

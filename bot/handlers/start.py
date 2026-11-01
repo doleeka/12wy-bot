@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
-from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram import Bot, F, Router
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,17 +12,37 @@ from bot.config import Settings, local_today
 from bot.handlers.onboarding import send_step_prompt
 from bot.handlers.wheel import wheel_question
 from bot.models import OnboardingStep
-from bot.services import cycle, wheel
+from bot.notify import display_name, safe_send
+from bot.services import cycle, teams, wheel
 from bot.services.users import get_or_create_user
 
 router = Router(name="start")
 # Личные команды — только в личке: в группе /checkin или /plan показали бы цели и тактики всем
 router.message.filter(F.chat.type == "private")
 
+# t.me/<бот>?start=solo — пригласить сразу на самостоятельное прохождение: только приложение, без тройки
+SOLO_START = "solo"
+
+
+async def _join_solo_by_link(bot: Bot | None, session: AsyncSession, user, settings: Settings | None) -> None:
+    """Пришла по ссылке «без тройки»: если она ещё ни в какой тройке — в распределение не попадёт.
+    Кто уже в тройке, того ссылка не двигает (перевести можно /solo)."""
+    if user.no_team or (settings and user.telegram_id in settings.admin_ids):
+        return
+    if await teams.get_team_of(session, user) is not None:
+        return
+    user.no_team = True
+    await session.commit()
+    for admin_id in settings.admin_ids if settings and bot else []:
+        await safe_send(bot, admin_id, texts.SOLO_LINK_JOINED.format(name=display_name(user), tg_id=user.telegram_id))
+
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
+async def cmd_start(message: Message, session: AsyncSession, settings: Settings | None = None,
+                    command: CommandObject | None = None, bot: Bot | None = None) -> None:
     user = await get_or_create_user(session, message.from_user)
+    if command is not None and (command.args or "").strip().lower() == SOLO_START:
+        await _join_solo_by_link(bot, session, user, settings)
     name = escape(message.from_user.first_name or "")
     today = local_today(settings)
     cycle.maybe_finish_cycle(user, today)
@@ -31,6 +51,8 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings 
         scores = await wheel.get_scores(session, user)
         if not scores:
             welcome = texts.NEW_CYCLE_WELCOME if user.cycle > 1 else texts.WELCOME
+            if user.no_team and not (settings and user.telegram_id in settings.admin_ids):
+                welcome = welcome.replace(texts.WELCOME_TEAM_LINE, texts.WELCOME_SOLO_LINE)
             webapp_url = settings.webapp_url if settings else ""
             await message.answer(welcome.format(name=name), reply_markup=keyboards.wheel_begin(webapp_url))
             return
