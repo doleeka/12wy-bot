@@ -32,6 +32,7 @@ async def _join_solo_by_link(bot: Bot | None, session: AsyncSession, user, setti
     if await teams.get_team_of(session, user) is not None:
         return
     user.no_team = True
+    user.tariff = "app"  # ссылка «без тройки» — тариф «Приложение»
     await session.commit()
     for admin_id in settings.admin_ids if settings and bot else []:
         await safe_send(bot, admin_id, texts.SOLO_LINK_JOINED.format(name=display_name(user), tg_id=user.telegram_id))

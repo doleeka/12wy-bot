@@ -102,9 +102,10 @@ async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Sett
     common_before = old_tariff in (payments.BASIC, payments.FOCUS)
     common_now = in_common_chat(user)
     await apply_tariff_team(bot, session, user, settings)
-    if user.chats_paused:
+    paused = await payments.locked(session, user, local_today(settings), _admins(settings))
+    if user.chats_paused and not paused:
         await restore_chats(bot, session, user)
-    elif user.is_ready and common_now and not common_before:  # перешла с «Приложения» — в общий чат
+    elif user.is_ready and common_now and not common_before and not paused:  # с «Приложения» — в общий чат
         await send_common_link(bot, session, user)
     if common_before and not common_now and (chat_id := await common_chat_id(session)):
         await remove_from_chat(bot, chat_id, user.telegram_id)  # «Приложение» — без общего чата
@@ -349,6 +350,49 @@ async def cmd_paid(message: Message, command: CommandObject, session: AsyncSessi
         parts.append(texts.PAID_BULK_MISSING.format(rows=", ".join(missing)))
     if many:
         parts.append(texts.PAID_BULK_MANY.format(rows=", ".join(many)))
+    await message.answer("\n\n".join(parts))
+
+
+async def change_tariff(bot: Bot, session: AsyncSession, user: User, tariff: str, settings: Settings | None) -> None:
+    """Сменить тариф без оплаты: «Приложение» — без тройки и общего чата, «Базовый» — тройка, «Фокус-группа» —
+    фокус-группа потока. Оплаченные месяцы не меняются; цена следующих — по новому тарифу."""
+    old_tariff = user.tariff
+    user.tariff = tariff
+    user.no_team = tariff == payments.APP
+    user.pay_choice = None
+    await after_paid(bot, session, user, settings, None, old_tariff)  # команда и общий чат — как после оплаты
+    await safe_send(bot, user.telegram_id, texts.TARIFF_CHANGED.format(tariff=TARIFF_NAMES[tariff]))
+
+
+@router.message(Command("tariff"), IsAdmin())
+async def cmd_tariff(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
+                     settings: Settings | None = None) -> None:
+    """/tariff фокус id1 @ник2 … — сменить тариф одной или сразу многим, без отметки об оплате."""
+    tokens = (command.args or "").replace(",", " ").split()
+    tariff = payments.TARIFF_ALIASES.get(tokens[0].lower()) if tokens else None
+    queries = tokens[1:]
+    if tariff is None or not queries:
+        await message.answer(texts.TARIFF_USAGE)
+        return
+    done, same, missing = [], [], []
+    for q in dict.fromkeys(queries):
+        found = await members.find_users(session, q)
+        if len(found) != 1:
+            missing.append(escape(q) + (" (несколько совпадений)" if found else ""))
+            continue
+        u = found[0]
+        if u.telegram_id in _admins(settings):
+            missing.append(escape(q) + " (админ)")
+        elif u.tariff == tariff and u.no_team == (tariff == payments.APP):
+            same.append(display_name(u))
+        else:
+            await change_tariff(bot, session, u, tariff, settings)
+            done.append(display_name(u))
+    parts = [texts.TARIFF_DONE.format(tariff=TARIFF_NAMES[tariff], n=len(done), rows=", ".join(done) or "—")]
+    if same:
+        parts.append(texts.TARIFF_SAME.format(rows=", ".join(same)))
+    if missing:
+        parts.append(texts.PAID_BULK_MISSING.format(rows=", ".join(missing)))
     await message.answer("\n\n".join(parts))
 
 
@@ -613,7 +657,7 @@ async def cmd_revenue(message: Message, session: AsyncSession, settings: Setting
         pending_total=money(sum(p.amount for p, _ in waiting)) if waiting else "0 ₸", free=free))
 
 
-@router.message(Command("payment", "paid", "price", "cohort", "revenue", "who"))
+@router.message(Command("payment", "paid", "price", "cohort", "revenue", "who", "tariff"))
 async def payments_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

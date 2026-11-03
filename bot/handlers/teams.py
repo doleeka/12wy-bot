@@ -166,6 +166,7 @@ async def make_solo(bot: Bot, session: AsyncSession, user: User, settings: Setti
     """
     was_solo = user.no_team
     user.no_team = True
+    user.tariff = "app"  # без тройки — это тариф «Приложение»
     old_team = await teams.leave_team(session, user)
     await session.commit()
     delivered = removed = True
@@ -343,6 +344,8 @@ async def cmd_unsolo(message: Message, command: CommandObject, session: AsyncSes
         await message.answer(texts.UNSOLO_NOT_SOLO.format(who=display_name(user)))
         return
     user.no_team = False
+    if user.tariff in (None, "app"):
+        user.tariff = "basic"  # снова в тройке — тариф «Базовый»
     await session.commit()
     if not user.is_ready:
         await message.answer(texts.UNSOLO_LATER.format(who=display_name(user)))

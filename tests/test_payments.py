@@ -489,3 +489,38 @@ async def test_cohort_that_started_at_week5_late_joiner_and_veteran(sessionmaker
         all_marks = list(await s.scalars(select(Checkin).where(Checkin.user_id == vet.id)))
         assert len(all_marks) == 8  # история 05.10 цела
         assert (await teams.get_team_of(s, late)).cohort_id == 3
+
+
+async def test_admin_changes_tariff_without_payment(sessionmaker, tg):
+    from bot.team_notify import COMMON_CHAT
+    await member(sessionmaker, 401, "app")    # «без комьюнити»
+    await member(sessionmaker, 402, "app")
+    await member(sessionmaker, 403, "basic")
+    async with sessionmaker() as s:
+        await payments.set_setting(s, COMMON_CHAT, "-100900")
+        await s.commit()
+    await send(tg, "/tariff базовый 401 402 нетакой", ADMIN_ID, "private", ADMIN_ID)
+    report = tg[2].sent(ADMIN_ID)[-1]
+    assert "Тариф «Базовый»: 2" in report and "Не нашла: нетакой" in report
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 401)
+        assert u.tariff == "basic" and not u.no_team and u.paid_through == 1  # оплата не тронута
+        assert (await teams.get_team_of(s, u)) is not None  # сразу в тройку
+    assert any("сменила твой тариф на «Базовый»" in t for t in tg[2].sent(401))
+    assert any("Общий чат" in t for t in tg[2].sent(401))  # и ссылка в общий чат
+
+    await send(tg, "/tariff фокус 403", ADMIN_ID, "private", ADMIN_ID)
+    async with sessionmaker() as s:
+        team = await teams.get_team_of(s, await teams.get_user_by_telegram_id(s, 403))
+        assert team.is_focus
+    await send(tg, "/tariff приложение 402", ADMIN_ID, "private", ADMIN_ID)
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 402)
+        assert u.tariff == "app" and u.no_team and await teams.get_team_of(s, u) is None
+    await send(tg, "/tariff приложение 402", ADMIN_ID, "private", ADMIN_ID)
+    assert "Уже на этом тарифе" in tg[2].sent(ADMIN_ID)[-1]
+
+    await send(tg, "/solo 401", ADMIN_ID, "private", ADMIN_ID)  # /solo — это тоже «Приложение»
+    assert (await user(sessionmaker, 401)).tariff == "app"
+    await send(tg, "/unsolo 401", ADMIN_ID, "private", ADMIN_ID)
+    assert (await user(sessionmaker, 401)).tariff == "basic"
