@@ -90,14 +90,15 @@ async def welcome(bot: Bot, user: User, settings: Settings | None) -> None:
     await safe_send(bot, user.telegram_id, text, reply_markup=keyboards.wheel_begin(settings.webapp_url if settings else ""))
 
 
-async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Settings | None, text: str,
+async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Settings | None, text: str | None,
                      old_tariff: str | None) -> None:
     """Ей — что доступ открыт; тариф меняет команду (приложение — без тройки, фокус — фокус-группа) и общий чат;
     была на паузе — ссылки вернуться в чаты; ещё не начинала — приветствие онбординга."""
     from bot.handlers.teams import apply_tariff_team  # noqa: PLC0415 — без циклического импорта
 
     await session.commit()
-    await safe_send(bot, user.telegram_id, text)
+    if text:  # None — отметили тихо (админ отметила прошлую оплату, доступ у неё и не закрывался)
+        await safe_send(bot, user.telegram_id, text)
     common_before = old_tariff in (payments.BASIC, payments.FOCUS)
     common_now = in_common_chat(user)
     await apply_tariff_team(bot, session, user, settings)
@@ -108,7 +109,7 @@ async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Sett
     if common_before and not common_now and (chat_id := await common_chat_id(session)):
         await remove_from_chat(bot, chat_id, user.telegram_id)  # «Приложение» — без общего чата
     await session.commit()
-    if user.onboarding_step == OnboardingStep.WHEEL:
+    if text and user.onboarding_step == OnboardingStep.WHEEL:
         await welcome(bot, user, settings)
 
 
@@ -291,34 +292,107 @@ async def _one_user(message: Message, session: AsyncSession, q: str, cmd: str) -
     return None
 
 
-@router.message(Command("paid"), IsAdmin())
-async def cmd_paid(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
-                   settings: Settings | None = None) -> None:
-    args = (command.args or "").split()
-    if not args:
-        await message.answer(texts.PAID_USAGE)
-        return
-    to_end = len(args) > 1 and args[-1] in {"3", "все", "all"}
-    user = await _one_user(message, session, " ".join(args[:-1] if to_end else args), "paid")
-    if user is None:
-        return
-    month_from = await payments.due_month(session, user, local_today(settings), _admins(settings), assume_on=True) \
-        or user.paid_through + 1
+async def _mark_paid(bot: Bot, session: AsyncSession, user: User, settings: Settings | None, admin_id: int,
+                     tariff: str | None, to_end: bool) -> int | None:
+    """Отметить оплату без чека: следующий нужный месяц (или до конца цикла). None — уже всё оплачено.
+    Ей пишем, только если у неё был закрыт доступ или она ждала решения по чеку; иначе — тихо."""
+    today = local_today(settings)
+    month_from = await payments.due_month(session, user, today, _admins(settings), assume_on=True) or user.paid_through + 1
     if month_from > payments.CYCLE_MONTHS:
-        await message.answer(texts.PAID_NOTHING.format(who=display_name(user)))
-        return
+        return None
+    notify = await payments.locked(session, user, today, _admins(settings)) or bool(await payments.pending_of(session, user))
     months = payments.CYCLE_MONTHS - month_from + 1 if to_end else 1
-    tariff = user.tariff or payments.BASIC
+    tariff = tariff or user.tariff or payments.BASIC
     monthly = await payments.price(session, user, tariff, 1) or 0
     amount = (await payments.price(session, user, tariff, 3) if months == 3 else None) or monthly * months
     old_tariff = user.tariff
-    await payments.grant(session, user, payments.Option(tariff, months, amount), month_from, message.from_user.id)
+    await payments.grant(session, user, payments.Option(tariff, months, amount), month_from, admin_id)
     for other in await payments.pending_of(session, user):  # её чеки, если были, больше не ждут решения
-        payments.approve(other, user, message.from_user.id)
+        payments.approve(other, user, admin_id)
         user.tariff = tariff
-    await after_paid(bot, session, user, settings, _approved_text(user), old_tariff)
-    await message.answer(texts.PAID_DONE.format(who=display_name(user), month=user.paid_through,
-                                                tariff=TARIFF_NAMES[tariff]))
+    await after_paid(bot, session, user, settings, _approved_text(user) if notify else None, old_tariff)
+    return user.paid_through
+
+
+@router.message(Command("paid"), IsAdmin())
+async def cmd_paid(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
+                   settings: Settings | None = None) -> None:
+    """/paid @ник1 @ник2 id … [тариф] [3] — отметить оплату без чека одной или сразу многим."""
+    tokens = (command.args or "").replace(",", " ").split()
+    tariff = next((payments.TARIFF_ALIASES[t.lower()] for t in tokens if t.lower() in payments.TARIFF_ALIASES), None)
+    to_end = any(t.lower() in {"3", "все", "all"} for t in tokens)
+    queries = [t for t in tokens if t.lower() not in payments.TARIFF_ALIASES and t.lower() not in {"3", "все", "all"}]
+    if not queries:
+        await message.answer(texts.PAID_USAGE)
+        return
+    if len(queries) == 1:  # один человек — подробные ответы, как раньше
+        user = await _one_user(message, session, queries[0], "paid")
+        if user is None:
+            return
+        month = await _mark_paid(bot, session, user, settings, message.from_user.id, tariff, to_end)
+        await message.answer(texts.PAID_NOTHING.format(who=display_name(user)) if month is None else
+                             texts.PAID_DONE.format(who=display_name(user), month=month, tariff=TARIFF_NAMES[user.tariff]))
+        return
+    done, already, missing, many = [], [], [], []
+    for q in dict.fromkeys(queries):  # без повторов, в том же порядке
+        found = await members.find_users(session, q)
+        if len(found) != 1:
+            (many if found else missing).append(escape(q))
+            continue
+        month = await _mark_paid(bot, session, found[0], settings, message.from_user.id, tariff, to_end)
+        (already if month is None else done).append(
+            display_name(found[0]) + ("" if month is None else f" — по {month}-й месяц, {TARIFF_NAMES[found[0].tariff]}"))
+    parts = [texts.PAID_BULK_DONE.format(n=len(done), rows="\n".join(f"• {r}" for r in done) or "—")]
+    if already:
+        parts.append(texts.PAID_BULK_ALREADY.format(rows=", ".join(already)))
+    if missing:
+        parts.append(texts.PAID_BULK_MISSING.format(rows=", ".join(missing)))
+    if many:
+        parts.append(texts.PAID_BULK_MANY.format(rows=", ".join(many)))
+    await message.answer("\n\n".join(parts))
+
+
+async def _send_long(message: Message, text: str, limit: int = 3800) -> None:
+    """Telegram режет сообщения длиннее 4096 символов — делим по строкам."""
+    chunk = ""
+    for line in text.split("\n"):
+        if len(chunk) + len(line) + 1 > limit:
+            await message.answer(chunk)
+            chunk = ""
+        chunk += line + "\n"
+    if chunk.strip():
+        await message.answer(chunk)
+
+
+@router.message(Command("who"), IsAdmin())
+async def cmd_who(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
+    """Кто оплатил, кто нет — по потокам, с id (сверить с переводами и отметить /paid сразу многих)."""
+    today = local_today(settings)
+    blocks = []
+    for cohort in await payments.cohorts(session):
+        users = list(await session.scalars(select(User).where(
+            User.cohort_id == cohort.id, User.excluded_at.is_(None)).order_by(User.id)))
+        users = [u for u in users if u.telegram_id not in _admins(settings)]
+        if not users:
+            continue
+        paid, unpaid, free, onboarding = [], [], [], 0
+        for u in users:
+            row = texts.WHO_ROW.format(name=display_name(u), tg_id=u.telegram_id,
+                                       tariff=TARIFF_NAMES.get(u.tariff or "", "—"))
+            if u.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED) and u.paid_through == 0:
+                onboarding += 1
+            elif await payments.is_free(session, u):
+                free.append(row)
+            elif (month := await payments.due_month(session, u, today, _admins(settings), assume_on=True)) is not None:
+                unpaid.append(row + texts.WHO_DUE.format(month=month))
+            else:
+                paid.append(row + texts.WHO_PAID.format(month=u.paid_through))
+        blocks.append(texts.WHO_COHORT.format(
+            n=cohort.number, start=f"{cohort.start:%d.%m.%Y}",
+            unpaid_n=len(unpaid), unpaid="\n".join(unpaid) or "—",
+            paid_n=len(paid), paid="\n".join(paid) or "—",
+            free_n=len(free), free="\n".join(free) or "—", onboarding=onboarding))
+    await _send_long(message, "\n\n".join(blocks) + "\n\n" + texts.WHO_HINT if blocks else texts.WHO_EMPTY)
 
 
 def _amount_arg(raw: str) -> int | None | str:
@@ -454,7 +528,7 @@ async def cmd_revenue(message: Message, session: AsyncSession, settings: Setting
         pending_total=money(sum(p.amount for p, _ in waiting)) if waiting else "0 ₸", free=free))
 
 
-@router.message(Command("payment", "paid", "price", "cohort", "revenue"))
+@router.message(Command("payment", "paid", "price", "cohort", "revenue", "who"))
 async def payments_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

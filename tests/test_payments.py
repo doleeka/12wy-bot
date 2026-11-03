@@ -364,3 +364,36 @@ async def test_cohorts_do_not_mix(sessionmaker, tg):
         assert await align_to_cohort_start(s, DEC28, date(2026, 11, 3), 2) == 1
         await s.commit()
     assert (await user(sessionmaker, 2)).cycle_start == DEC28
+
+
+async def test_who_and_bulk_paid(sessionmaker, tg):
+    """Многие оплатили напрямую: /who показывает, кто нет; /paid отмечает сразу многих — тихо, пока доступ открыт."""
+    for tg_id in (101, 102, 103, 104):
+        await member(sessionmaker, tg_id, "basic")
+    await member(sessionmaker, 105, "app")
+    async with sessionmaker() as s:
+        (await teams.get_user_by_telegram_id(s, 102)).username = "dana"
+        await s.commit()
+    await send(tg, "/who", ADMIN_ID, "private", ADMIN_ID)
+    who = tg[2].sent(ADMIN_ID)[-1]
+    assert "Не оплачено (4)" in who and "Бесплатный тариф (1)" in who and "<code>101</code>" in who
+    assert "нужен 2-й месяц" in who
+
+    tg[2].calls.clear()
+    await send(tg, "/paid 101, @dana 103 нетакой", ADMIN_ID, "private", ADMIN_ID)
+    report = tg[2].sent(ADMIN_ID)[-1]
+    assert "Отмечено: 3" in report and "по 2-й месяц, Базовый" in report and "Не нашла: нетакой" in report
+    assert not any(tg[2].sent(i) for i in (101, 102, 103))  # оплата выключена, доступ не закрывался — тихо
+    for tg_id in (101, 102, 103):
+        assert (await user(sessionmaker, tg_id)).paid_through == 2
+
+    await send(tg, "/paid фокус 104", ADMIN_ID, "private", ADMIN_ID)  # с тарифом
+    assert (await user(sessionmaker, 104)).tariff == "focus"
+    await send(tg, "/who", ADMIN_ID, "private", ADMIN_ID)
+    assert "Не оплачено (0)" in tg[2].sent(ADMIN_ID)[-1] and "Оплачено (4)" in tg[2].sent(ADMIN_ID)[-1]
+
+    # после включения: у кого доступ закрыт, тому /paid пишет, что всё открыто
+    await member(sessionmaker, 106, "basic")
+    await turn_on(tg)
+    await send(tg, "/paid 106", ADMIN_ID, "private", ADMIN_ID)
+    assert "доступ открыт по 2-й месяц" in tg[2].sent(106)[-1]
