@@ -6,8 +6,8 @@ from itertools import count
 
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import CreateChatInviteLink, GetMe, SendMessage
-from aiogram.types import Chat, ChatInviteLink, Message, MessageEntity, Update, User
+from aiogram.methods import CopyMessage, CreateChatInviteLink, GetMe, SendMessage
+from aiogram.types import Chat, ChatInviteLink, Message, MessageEntity, MessageId, Update, User
 
 BOT_USER = User(id=1000, is_bot=True, first_name="12WY", username="twelve_wy_bot")
 
@@ -27,6 +27,8 @@ class FakeSession(BaseSession):
             return Message(
                 message_id=next(self._ids), date=datetime.now(), chat=Chat(id=method.chat_id, type="private"), text=method.text
             )
+        if isinstance(method, CopyMessage):
+            return MessageId(message_id=next(self._ids))
         if isinstance(method, GetMe):
             return BOT_USER
         if isinstance(method, CreateChatInviteLink):

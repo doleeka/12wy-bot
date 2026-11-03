@@ -2,7 +2,7 @@
 
 users, wheel_of_balance, explore_list, priorities, essential_intent,
 weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members,
-archived_checkins, archived_daily_marks
+archived_checkins, archived_daily_marks, app_settings, payments
 """
 from __future__ import annotations
 
@@ -88,6 +88,8 @@ class User(Base):
     # Исключён админом из сообщества (/remove): ничего не получает, не считается, приложение закрыто.
     # Данные не удаляются — /restore возвращает
     excluded_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Оплата подтверждена админом (или участница была в боте до того, как ввели оплату)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -339,3 +341,30 @@ class PlanChange(Base):
     plan_before: Mapped[list] = mapped_column(JSON)
     marks_before: Mapped[list] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AppSetting(Base):
+    """Настройки, которые админ меняет прямо в боте (оплата: включена ли, текст с ценой и реквизитами)."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
+class PaymentStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class Payment(Base):
+    """Чек об оплате, присланный в бот, и решение админа по нему."""
+    __tablename__ = "payments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    file_id: Mapped[str] = mapped_column(String(256))
+    file_kind: Mapped[str] = mapped_column(String(16))  # photo | document
+    status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus, native_enum=False), default=PaymentStatus.PENDING)
+    tariff: Mapped[str | None] = mapped_column(String(16))  # team | solo — выбирает админ при подтверждении
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    decided_by: Mapped[int | None] = mapped_column(BigInteger)

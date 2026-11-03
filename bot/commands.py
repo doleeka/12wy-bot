@@ -33,6 +33,8 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="admin", description="Управление сообществом"),
     BotCommand(command="remove", description="Админ: исключить из сообщества (тихо, обратимо)"),
     BotCommand(command="restore", description="Админ: вернуть исключённых / список"),
+    BotCommand(command="payment", description="Админ: оплата — цена, реквизиты, вкл/выкл"),
+    BotCommand(command="paid", description="Админ: открыть доступ без чека"),
     BotCommand(command="broadcast", description="Админ: сообщение всем (с предпросмотром)"),
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),
     BotCommand(command="teams", description="Админ: все команды"),

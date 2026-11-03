@@ -22,6 +22,7 @@ from bot.models import Checkin, DailyMark, EssentialIntent, ExploreItem, Onboard
 from bot.services import checkins, cycle, scorecard, tactics, teams, wheel, plan_history
 from bot.services import today as today_svc
 from bot.services import vision as vision_svc
+from bot.services import payments as payments_svc
 from bot.services import onboarding as svc
 from bot.services.users import get_or_create_user
 from bot.handlers.checkin import advice_for, send_report
@@ -132,6 +133,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         user = await get_or_create_user(session, tg.user)
         if user.excluded_at is not None and user.telegram_id not in settings.admin_ids:
             raise HTTPException(status_code=403, detail="excluded")  # исключена из сообщества (/remove)
+        if not sandbox and await payments_svc.needs_payment(session, user, settings.admin_ids):
+            raise HTTPException(status_code=403, detail="unpaid")  # оплата включена, а её ещё не подтвердили
         if sandbox:
             user.no_team = True
             if user.sandbox_week is None:

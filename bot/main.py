@@ -18,7 +18,7 @@ from bot.commands import set_bot_commands, set_webapp_menu_button
 from bot.config import load_settings, local_today
 from bot.db import create_engine, create_sessionmaker
 from bot.migrate import run_migrations
-from bot.handlers import admin, broadcast, checkin, members, cycle, fallback, group, onboarding, start, teams, wheel
+from bot.handlers import admin, broadcast, checkin, members, cycle, fallback, group, onboarding, payments, start, teams, wheel
 from bot.middlewares import DbSessionMiddleware, ExcludedMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
@@ -42,6 +42,7 @@ def build_dispatcher(sessionmaker) -> Dispatcher:  # noqa: ANN001
     # group — только групповые чаты; остальные роутеры — только личка (фильтр задан в каждом модуле)
     dp.include_routers(
         group.router,
+        payments.router,  # раньше личных: без оплаты (если она включена) — только инструкция и приём чека
         start.router,
         admin.router,
         broadcast.router,
