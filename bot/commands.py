@@ -39,6 +39,7 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="who", description="Админ: кто оплатил, кто нет"),
     BotCommand(command="tariff", description="Админ: сменить тариф (можно многим)"),
     BotCommand(command="paid", description="Админ: отметить оплату без чека (можно многим)"),
+    BotCommand(command="unpaid", description="Админ: отменить ошибочную отметку оплаты"),
     BotCommand(command="revenue", description="Админ: деньги за месяц, паузы, чеки"),
     BotCommand(command="broadcast", description="Админ: сообщение всем (с предпросмотром)"),
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),

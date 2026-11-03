@@ -524,3 +524,31 @@ async def test_admin_changes_tariff_without_payment(sessionmaker, tg):
     assert (await user(sessionmaker, 401)).tariff == "app"
     await send(tg, "/unsolo 401", ADMIN_ID, "private", ADMIN_ID)
     assert (await user(sessionmaker, 401)).tariff == "basic"
+
+
+async def test_unpaid_undoes_a_mistaken_mark(sessionmaker, tg):
+    from sqlalchemy import select
+    await member(sessionmaker, 501, "basic")
+    await member(sessionmaker, 502, "basic")
+    await send(tg, "/paid 501 502", ADMIN_ID, "private", ADMIN_ID)
+    await send(tg, "/paid 501", ADMIN_ID, "private", ADMIN_ID)  # ещё и 3-й месяц — по ошибке
+    assert (await user(sessionmaker, 501)).paid_through == 3
+
+    tg[2].calls.clear()
+    await send(tg, "/unpaid 501", ADMIN_ID, "private", ADMIN_ID)
+    assert "Отменено: 1" in tg[2].sent(ADMIN_ID)[-1] and "по 2-й месяц" in tg[2].sent(ADMIN_ID)[-1]
+    assert (await user(sessionmaker, 501)).paid_through == 2  # откатили только последнюю
+    await send(tg, "/unpaid 501", ADMIN_ID, "private", ADMIN_ID)
+    assert (await user(sessionmaker, 501)).paid_through == 1
+    await send(tg, "/unpaid 501", ADMIN_ID, "private", ADMIN_ID)
+    assert "Нет подтверждённых оплат" in tg[2].sent(ADMIN_ID)[-1]
+    assert not tg[2].sent(501)  # ей ничего не приходит
+    async with sessionmaker() as s:
+        rows = list(await s.scalars(select(Payment).where(Payment.user_id == (await teams.get_user_by_telegram_id(s, 501)).id)))
+        assert len(rows) == 2 and {p.status for p in rows} == {PaymentStatus.REJECTED}  # история цела
+
+    # с включённой оплатой — видно, что у неё теперь закрыт доступ
+    await turn_on(tg)
+    await send(tg, "/unpaid 502", ADMIN_ID, "private", ADMIN_ID)
+    assert "доступ закрыт до оплаты" in tg[2].sent(ADMIN_ID)[-1]
+    assert await app_status(sessionmaker, 502) == (403, "unpaid")

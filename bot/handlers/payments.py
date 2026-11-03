@@ -353,6 +353,40 @@ async def cmd_paid(message: Message, command: CommandObject, session: AsyncSessi
     await message.answer("\n\n".join(parts))
 
 
+@router.message(Command("unpaid"), IsAdmin())
+async def cmd_unpaid(message: Message, command: CommandObject, session: AsyncSession,
+                     settings: Settings | None = None) -> None:
+    """/unpaid id1 @ник2 … — отменить последнюю отметку об оплате (поставили по ошибке). Ей ничего не пишем."""
+    queries = (command.args or "").replace(",", " ").split()
+    if not queries:
+        await message.answer(texts.UNPAID_USAGE)
+        return
+    today = local_today(settings)
+    done, nothing, missing = [], [], []
+    for q in dict.fromkeys(queries):
+        found = await members.find_users(session, q)
+        if len(found) != 1:
+            missing.append(escape(q) + (" (несколько совпадений)" if found else ""))
+            continue
+        u = found[0]
+        payment = await payments.undo_last(session, u, message.from_user.id)
+        if payment is None:
+            nothing.append(display_name(u))
+            continue
+        locked = await payments.locked(session, u, today, _admins(settings))
+        done.append(texts.UNPAID_ROW.format(
+            name=display_name(u), tariff=TARIFF_NAMES.get(payment.tariff, payment.tariff), period=_period(payment),
+            amount=money(payment.amount), now=texts.UNPAID_NOW.format(month=u.paid_through) if u.paid_through
+            else texts.UNPAID_NOW_NONE, locked=texts.UNPAID_LOCKED if locked else ""))
+    await session.commit()
+    parts = [texts.UNPAID_DONE.format(n=len(done), rows="\n".join(done) or "—")]
+    if nothing:
+        parts.append(texts.UNPAID_NOTHING.format(rows=", ".join(nothing)))
+    if missing:
+        parts.append(texts.PAID_BULK_MISSING.format(rows=", ".join(missing)))
+    await message.answer("\n\n".join(parts))
+
+
 async def change_tariff(bot: Bot, session: AsyncSession, user: User, tariff: str, settings: Settings | None) -> None:
     """Сменить тариф без оплаты: «Приложение» — без тройки и общего чата, «Базовый» — тройка, «Фокус-группа» —
     фокус-группа потока. Оплаченные месяцы не меняются; цена следующих — по новому тарифу."""
@@ -657,7 +691,7 @@ async def cmd_revenue(message: Message, session: AsyncSession, settings: Setting
         pending_total=money(sum(p.amount for p, _ in waiting)) if waiting else "0 ₸", free=free))
 
 
-@router.message(Command("payment", "paid", "price", "cohort", "revenue", "who", "tariff"))
+@router.message(Command("payment", "paid", "price", "cohort", "revenue", "who", "tariff", "unpaid"))
 async def payments_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

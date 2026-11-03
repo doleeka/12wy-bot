@@ -339,3 +339,20 @@ async def revenue(session: AsyncSession, since: datetime, until: datetime) -> Re
     )
     out = [(n, t, c, a) for n, t, c, a in rows]
     return Revenue(total=sum(r[3] for r in out), count=sum(r[2] for r in out), rows=out)
+
+
+async def undo_last(session: AsyncSession, user: User, admin_id: int) -> Payment | None:
+    """Отменить последнюю подтверждённую оплату (отметили по ошибке). Запись остаётся — со статусом «отклонено»;
+    оплачено снова по тот месяц, что был до неё (или по другим подтверждённым оплатам этого потока)."""
+    approved = list(await session.scalars(select(Payment).where(
+        Payment.user_id == user.id, Payment.status == PaymentStatus.APPROVED,
+        Payment.cohort_id.is_(None) if user.cohort_id is None else Payment.cohort_id == user.cohort_id,
+    ).order_by(Payment.decided_at.desc(), Payment.id.desc())))
+    if not approved:
+        return None
+    last, others = approved[0], approved[1:]
+    reject(last, admin_id)
+    if user.paid_through == last.month_from + last.months - 1:  # именно она продлила доступ — откатываем
+        user.paid_through = max([last.month_from - 1] + [p.month_from + p.months - 1 for p in others])
+    await session.flush()
+    return last
