@@ -96,6 +96,7 @@ def chat_line(team: Team | None) -> str:
 # ---------- общий чат (базовый + фокус-группа, все потоки) и пауза в чатах до оплаты ----------
 
 COMMON_CHAT = "common_chat_id"
+COMMON_THREAD = "common_thread_id"  # тема форума, где отправили /linkcommon; пусто — общая ветка
 
 
 async def common_chat_id(session: AsyncSession) -> int | None:
@@ -103,6 +104,13 @@ async def common_chat_id(session: AsyncSession) -> int | None:
 
     raw = await payments.get_setting(session, COMMON_CHAT)
     return int(raw) if raw and raw.lstrip("-").isdigit() else None
+
+
+async def common_thread_id(session: AsyncSession) -> int | None:
+    from bot.services import payments  # noqa: PLC0415
+
+    raw = await payments.get_setting(session, COMMON_THREAD)
+    return int(raw) if raw and raw.isdigit() else None
 
 
 def in_common_chat(user: User) -> bool:

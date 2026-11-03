@@ -15,7 +15,7 @@ from bot.filters import IsAdmin
 from bot.handlers.teams import team_rows
 from bot.notify import display_name, safe_send
 from bot.services import payments, teams
-from bot.team_notify import COMMON_CHAT, common_chat_id, create_invite, notify_admins
+from bot.team_notify import COMMON_CHAT, COMMON_THREAD, common_chat_id, create_invite, notify_admins
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +70,10 @@ async def cmd_unlinkteam_group(message: Message, session: AsyncSession) -> None:
 async def cmd_linkcommon(message: Message, session: AsyncSession, bot: Bot) -> None:
     """Общий чат сообщества (базовый + фокус-группа, все потоки): итоги недели и ссылки для новеньких."""
     await payments.set_setting(session, COMMON_CHAT, str(message.chat.id))
-    await message.answer(texts.COMMON_LINKED)
+    # в чате с темами — пишем в ту тему, где отправили команду; в общей ветке или обычном чате — без темы
+    thread = message.message_thread_id if message.is_topic_message else None
+    await payments.set_setting(session, COMMON_THREAD, str(thread or ""))
+    await message.answer(texts.COMMON_LINKED + (texts.COMMON_LINKED_TOPIC if thread else ""))
     try:  # ссылки новеньким и возврат после оплаты — только если бот админ с правом приглашать
         me = await bot.get_chat_member(message.chat.id, (await bot.me()).id)
         can_invite = me.status == "creator" or getattr(me, "can_invite_users", False)

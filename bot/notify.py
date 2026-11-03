@@ -12,9 +12,10 @@ from bot.models import User
 log = logging.getLogger(__name__)
 
 
-async def safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None) -> bool:  # noqa: ANN001
+async def safe_send(bot: Bot, chat_id: int, text: str, reply_markup=None, thread_id: int | None = None) -> bool:  # noqa: ANN001
+    """thread_id — тема в группе-форуме (None — общая ветка или обычный чат)."""
     try:
-        await bot.send_message(chat_id, text, reply_markup=reply_markup)
+        await bot.send_message(chat_id, text, reply_markup=reply_markup, message_thread_id=thread_id)
         return True
     except TelegramAPIError as e:  # заблокировала бота, удалила аккаунт и т.п.
         log.warning("Не удалось отправить сообщение %s: %s", chat_id, e)

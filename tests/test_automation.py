@@ -190,3 +190,31 @@ async def test_revenue_report(sessionmaker, tg):
     assert "на паузе до оплаты: <b>1</b>" in text and "ждут проверки: <b>1</b> на 1 990 ₸" in text
     await send(tg, "/revenue", 1, "private", 1)
     assert "только для админа" in tg[2].sent(1)[-1]
+
+
+async def test_common_chat_posts_into_the_topic_where_it_was_linked(sessionmaker, tg, clock):
+    from aiogram.methods import SendMessage
+    from aiogram.types import Chat, Message, MessageEntity, Update, User as TgUser
+    from itertools import count
+    ids = count(90_000)
+    await member(sessionmaker, 1, "basic")
+    week = MON - timedelta(days=7)
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 1)
+        for t in await checkins.tactics_for_week(s, u, week):
+            await checkins.set_mark(s, u, t.id, week, True)
+        await s.commit()
+    dp, bot = tg[0], tg[1]
+    await dp.feed_update(bot, Update(update_id=next(ids), message=Message(
+        message_id=next(ids), date=datetime.now(), chat=Chat(id=COMMON, type="supergroup", title="Сообщество", is_forum=True),
+        from_user=TgUser(id=ADMIN_ID, is_bot=False, first_name="A"), text="/linkcommon",
+        entities=[MessageEntity(type="bot_command", offset=0, length=11)], message_thread_id=77, is_topic_message=True)))
+    assert "в этой теме" in tg[2].sent(COMMON)[0]
+    clock["today"] = MON
+    assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is True
+    post = [c for c in tg[2].of_type(SendMessage) if c.chat_id == COMMON][-1]
+    assert post.message_thread_id == 77 and "Итоги недели" in post.text
+
+    await send(tg, "/linkcommon", COMMON, "supergroup", ADMIN_ID)  # из общей ветки — без темы
+    await send_common_weekly(tg[1], sessionmaker, SETTINGS)
+    assert [c for c in tg[2].of_type(SendMessage) if c.chat_id == COMMON][-1].message_thread_id is None
