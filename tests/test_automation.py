@@ -107,7 +107,8 @@ async def test_common_weekly_numbers_only(sessionmaker, tg, clock):
     assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is False  # чат ещё не привязан
 
     await send(tg, "/linkcommon", COMMON, "supergroup", ADMIN_ID)
-    assert "общий чат сообщества" in tg[2].sent(COMMON)[0]
+    assert tg[2].sent(COMMON)[0].startswith("Готово 🌿 Итоги недели")  # в чат — коротко
+    assert "личная ссылка вступить" in tg[2].sent(ADMIN_ID)[-1]  # подробности — админу в личку
     assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is True
     text = tg[2].sent(COMMON)[-1]
     assert "26 октября – 1 ноября" in text and "2 из 2" in text and "<b>1</b>" in text and "75%" in text
@@ -209,7 +210,8 @@ async def test_common_chat_posts_into_the_topic_where_it_was_linked(sessionmaker
         message_id=next(ids), date=datetime.now(), chat=Chat(id=COMMON, type="supergroup", title="Сообщество", is_forum=True),
         from_user=TgUser(id=ADMIN_ID, is_bot=False, first_name="A"), text="/linkcommon",
         entities=[MessageEntity(type="bot_command", offset=0, length=11)], message_thread_id=77, is_topic_message=True)))
-    assert "в этой теме" in tg[2].sent(COMMON)[0]
+    assert "Итоги недели будут приходить сюда" in tg[2].sent(COMMON)[0]
+    assert "итоги в теме" in tg[2].sent(ADMIN_ID)[-1]
     clock["today"] = MON
     assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is True
     post = [c for c in tg[2].of_type(SendMessage) if c.chat_id == COMMON][-1]

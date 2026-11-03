@@ -73,14 +73,16 @@ async def cmd_linkcommon(message: Message, session: AsyncSession, bot: Bot) -> N
     # в чате с темами — пишем в ту тему, где отправили команду; в общей ветке или обычном чате — без темы
     thread = message.message_thread_id if message.is_topic_message else None
     await payments.set_setting(session, COMMON_THREAD, str(thread or ""))
-    await message.answer(texts.COMMON_LINKED + (texts.COMMON_LINKED_TOPIC if thread else ""))
+    await message.answer(texts.COMMON_LINKED)  # в чат — коротко, его видят все; подробности — админу в личку
+    details = texts.COMMON_LINKED_ADMIN.format(topic=texts.COMMON_LINKED_ADMIN_TOPIC if thread else "")
     try:  # ссылки новеньким и возврат после оплаты — только если бот админ с правом приглашать
         me = await bot.get_chat_member(message.chat.id, (await bot.me()).id)
         can_invite = me.status == "creator" or getattr(me, "can_invite_users", False)
     except Exception:  # noqa: BLE001
         can_invite = False
     if not can_invite:
-        await message.answer(texts.COMMON_INVITE_FAILED)
+        details += "\n\n" + texts.COMMON_INVITE_FAILED
+    await safe_send(bot, message.from_user.id, details)
 
 
 @router.message(Command("unlinkcommon"), IsAdmin())
