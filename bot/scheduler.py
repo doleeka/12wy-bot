@@ -79,8 +79,9 @@ async def send_week_planning(bot: Bot, sessionmaker: async_sessionmaker, setting
 
 async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings) -> int:
     """Окно оплаты следующего месяца: пятница перед ним — «можно оплатить», его первый понедельник — «сегодня
-    последний день», вторник без оплаты — «доступ на паузе». Каждый раз — с кнопками тарифов. Кто уже прислал
-    чек, тому не пишем. Пока оплата выключена — молчим."""
+    последний день», вторник без оплаты — «доступ на паузе» (бот и приложение). Каждый раз — с кнопками тарифов.
+    По средам — кто так и не оплатил, тихо убираем из чатов (после оплаты вернём ссылками). Кто уже прислал чек,
+    тех не трогаем. Пока оплата выключена — молчим."""
     from bot.handlers.payments import offer, weeks  # noqa: PLC0415 — без циклического импорта
 
     today = local_today(settings)
@@ -97,6 +98,9 @@ async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, set
             header = None
             win = await payments.window(session, user, today)
             due = await payments.due_month(session, user, today, settings.admin_ids)
+            if due and today.weekday() == 2 and not user.chats_paused:  # среда: на паузе — из чатов
+                await pause_chats(bot, session, user)
+                await session.commit()
             if win and today == win[1] - timedelta(days=payments.WINDOW_DAYS):
                 month = win[0]
                 header = texts.PAY_WINDOW.format(month=month, weeks=weeks(month), monday=f"{win[1]:%d.%m}")
@@ -105,9 +109,7 @@ async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, set
                 header = texts.PAY_LAST_DAY.format(month=month)
             elif due and user.cycle_start and today == payments.month_start(user.cycle_start, due) + timedelta(days=1):
                 month = due
-                header = texts.PAY_DUE.format(month=month, weeks=weeks(month))
-                await pause_chats(bot, session, user)  # пауза — тихо убираем из чатов, после оплаты вернём
-                await session.commit()
+                header = texts.PAY_DUE.format(month=month, weeks=weeks(month)) + texts.PAY_CHATS_WARNING
             if header is None:
                 continue
             text, markup = await offer(session, user, month, header)

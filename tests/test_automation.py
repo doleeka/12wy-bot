@@ -32,14 +32,24 @@ def ok_button(tg):
 
 # ---------- 8. чаты: пауза до оплаты и возврат ----------
 
-async def test_pause_removes_from_chats_and_payment_brings_links(sessionmaker, tg):
+async def test_pause_removes_from_chats_and_payment_brings_links(sessionmaker, tg, clock):
     await member(sessionmaker, 1, "basic")
     await member(sessionmaker, 2, "app")  # «Приложение» бесплатно — не на паузе, из чатов не убираем
     await link_chats(sessionmaker)
+    await member(sessionmaker, 3, "basic")  # не оплатит до среды, но пришлёт чек — из чатов не убираем
     tg[2].calls.clear()
-    await turn_on(tg)  # вторник 5-й недели: у «Базового» без оплаты — пауза
+    await turn_on(tg)  # вторник 5-й недели: у «Базового» без оплаты закрыт бот и приложение, чаты — пока нет
+    assert "в среду я уберу тебя из чатов" in tg[2].sent(1)[-1]
+    assert not tg[2].of_type(BanChatMember) and not (await user(sessionmaker, 1)).chats_paused
+    await press(tg, "pay:pick:basic:1", user_id=3)
+    await receipt(tg, 3)
+
+    clock["today"] = date(2026, 11, 4)  # среда — из чатов убираем тех, кто так и не оплатил
+    await scheduler.send_payment_reminders(tg[1], sessionmaker, SETTINGS)
     assert sorted((b.chat_id, b.user_id) for b in tg[2].of_type(BanChatMember)) == [(COMMON, 1), (TRIO_CHAT, 1)]
-    assert (await user(sessionmaker, 1)).chats_paused
+    assert (await user(sessionmaker, 1)).chats_paused and not (await user(sessionmaker, 3)).chats_paused
+    await scheduler.send_payment_reminders(tg[1], sessionmaker, SETTINGS)  # повторно не убираем
+    assert len(tg[2].of_type(BanChatMember)) == 2
 
     tg[2].calls.clear()
     await press(tg, "pay:pick:basic:1", user_id=1)

@@ -22,8 +22,7 @@ from bot.notify import display_name, safe_send
 from bot.services import members, payments, teams
 from bot.services.payments import TARIFF_NAMES, money, months_word
 from bot.services.users import get_or_create_user
-from bot.team_notify import (common_chat_id, in_common_chat, pause_chats, remove_from_chat, restore_chats,
-                              send_common_link)
+from bot.team_notify import common_chat_id, in_common_chat, remove_from_chat, restore_chats, send_common_link
 
 router = Router(name="payments")
 router.message.filter(F.chat.type == "private")
@@ -260,8 +259,8 @@ async def cmd_payment(message: Message, command: CommandObject, session: AsyncSe
         for user, month in to_lock:
             if user.onboarding_step == OnboardingStep.WHEEL and month == 1:
                 continue  # ещё не начинала — увидит выбор тарифа, как только напишет боту
-            await pause_chats(bot, session, user)
             text, markup = await offer_due(session, user, month, user.first_name or "")
+            text += texts.PAY_CHATS_WARNING  # из чатов — в ближайшую среду, если не оплатит
             sent += await safe_send(bot, user.telegram_id, text, reply_markup=markup)
         await session.commit()
         await message.answer(texts.PAY_ON.format(sent=sent))
