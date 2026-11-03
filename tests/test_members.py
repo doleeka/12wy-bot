@@ -145,3 +145,25 @@ async def test_cancel_guards_and_admin_only(sessionmaker, tg):
     await press(tg, yes, user_id=2)
     async with sessionmaker() as session:
         assert (await teams.get_user_by_telegram_id(session, 3)).excluded_at is None
+
+
+async def test_remove_also_from_common_chat_and_restore_sends_link(sessionmaker, tg):  # noqa: F811
+    from bot.services import payments
+    from bot.team_notify import COMMON_CHAT
+    await community(sessionmaker)
+    async with sessionmaker() as session:
+        await payments.set_setting(session, COMMON_CHAT, "-100900")
+        team = await teams.get_team_of(session, await teams.get_user_by_telegram_id(session, 1))
+        team.chat_id = -100500
+        await session.commit()
+    tg[2].calls.clear()
+    await send(tg, "/remove @arman", ADMIN_ID, "private", ADMIN_ID)
+    assert "из чата команды и из общего чата" in tg[2].sent(ADMIN_ID)[-1]
+    yes, _ = last_buttons(tg[2], ADMIN_ID)
+    await press(tg, yes)
+    assert sorted((b.chat_id, b.user_id) for b in tg[2].of_type(BanChatMember)) == [(-100900, 1), (-100500, 1)]
+    assert {c.chat_id for c in tg[2].of_type(SendMessage)} == {ADMIN_ID}  # тихо
+
+    await send(tg, "/restore @arman", ADMIN_ID, "private", ADMIN_ID)
+    assert "ссылка вернуться в общий чат" in tg[2].sent(ADMIN_ID)[-1]
+    assert "Общий чат" in tg[2].sent(1)[-1]

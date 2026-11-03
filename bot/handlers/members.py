@@ -14,13 +14,21 @@ from bot.filters import IsAdmin
 from bot.models import User
 from bot.notify import display_name
 from bot.services import members, teams
-from bot.team_notify import remove_from_chat
+from bot.team_notify import common_chat_id, remove_from_chat, send_common_link
 
 router = Router(name="members")
 router.message.filter(F.chat.type == "private")
 
 # Ожидающие подтверждения исключения: одноразовый код в кнопке → (кто нажимает, кого исключаем)
 _pending: dict[str, tuple[int, int]] = {}
+
+
+def _chats_note(team_chat: bool, common: bool) -> str:
+    if team_chat and common:
+        return texts.REMOVE_CHAT_BOTH
+    if common:
+        return texts.REMOVE_CHAT_COMMON
+    return texts.REMOVE_CHAT if team_chat else ""
 
 
 def _row(u: User) -> str:
@@ -55,7 +63,7 @@ async def cmd_remove(message: Message, command: CommandObject, session: AsyncSes
             who=display_name(user),
             tg_id=user.telegram_id,
             team=texts.REMOVE_TEAM.format(team=teams.team_name(team)) if team else "",
-            chat=texts.REMOVE_CHAT if team and team.chat_id else "",
+            chat=_chats_note(team is not None and team.chat_id is not None, await common_chat_id(session) is not None),
         ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🚫 Исключить", callback_data=f"rm:yes:{code}"),
@@ -78,8 +86,11 @@ async def on_remove(callback: CallbackQuery, session: AsyncSession, bot: Bot) ->
         return
     user = await session.get(User, pending[1])
     team = await members.exclude(session, user)
+    # тихо: бот в чаты ничего не пишет — убирает из чата тройки и из общего чата сообщества
     if team is not None and team.chat_id:
-        await remove_from_chat(bot, team.chat_id, user.telegram_id)  # тихо: бот в чат ничего не пишет
+        await remove_from_chat(bot, team.chat_id, user.telegram_id)
+    if (common := await common_chat_id(session)) is not None:
+        await remove_from_chat(bot, common, user.telegram_id)
     await callback.message.answer(texts.REMOVE_DONE.format(
         who=display_name(user), tg_id=user.telegram_id,
         team=texts.REMOVE_TEAM.format(team=teams.team_name(team)) if team else "",
@@ -87,7 +98,7 @@ async def on_remove(callback: CallbackQuery, session: AsyncSession, bot: Bot) ->
 
 
 @router.message(Command("restore"), IsAdmin())
-async def cmd_restore(message: Message, command: CommandObject, session: AsyncSession) -> None:
+async def cmd_restore(message: Message, command: CommandObject, session: AsyncSession, bot: Bot) -> None:
     q = (command.args or "").strip()
     if not q:
         excluded = await members.list_excluded(session)
@@ -107,7 +118,10 @@ async def cmd_restore(message: Message, command: CommandObject, session: AsyncSe
         await message.answer(texts.RESTORE_NOT_EXCLUDED.format(who=display_name(user)))
         return
     members.restore(user)
-    await message.answer(texts.RESTORE_DONE.format(who=display_name(user)))
+    await session.commit()
+    # в общий чат её убрали при исключении — личная ссылка вернуться («Приложению» общий чат не положен)
+    linked = await send_common_link(bot, session, user)
+    await message.answer(texts.RESTORE_DONE.format(who=display_name(user)) + (texts.RESTORE_COMMON_LINK if linked else ""))
 
 
 @router.message(Command("remove", "restore"))
