@@ -123,6 +123,15 @@ async def send_common_weekly(bot: Bot, sessionmaker: async_sessionmaker, setting
         stats = await week_stats(session, week, None, skip)
     if not stats.participants:
         return False
-    return await safe_send(bot, chat_id, texts.COMMON_WEEKLY.format(
+    text = texts.COMMON_WEEKLY.format(
         period=period(week), checked=stats.checked, participants=stats.participants,
-        good=stats.bucket("good"), avg=f"{stats.average}%" if stats.average is not None else "—"), thread_id=thread_id)
+        good=stats.bucket("good"), avg=f"{stats.average}%" if stats.average is not None else "—")
+    if await safe_send(bot, chat_id, text, thread_id=thread_id):
+        return True
+    if thread_id is None:
+        return False
+    # тему удалили или закрыли — публикуем в общей ветке и говорим админу
+    sent = await safe_send(bot, chat_id, text)
+    for admin_id in settings.admin_ids:
+        await safe_send(bot, admin_id, texts.COMMON_TOPIC_LOST)
+    return sent

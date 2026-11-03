@@ -218,3 +218,31 @@ async def test_common_chat_posts_into_the_topic_where_it_was_linked(sessionmaker
     await send(tg, "/linkcommon", COMMON, "supergroup", ADMIN_ID)  # из общей ветки — без темы
     await send_common_weekly(tg[1], sessionmaker, SETTINGS)
     assert [c for c in tg[2].of_type(SendMessage) if c.chat_id == COMMON][-1].message_thread_id is None
+
+
+async def test_common_topic_gone_falls_back_to_general(sessionmaker, tg, clock):
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SendMessage
+    from bot.team_notify import COMMON_THREAD
+    await member(sessionmaker, 1, "basic")
+    week = MON - timedelta(days=7)
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 1)
+        for t in await checkins.tactics_for_week(s, u, week):
+            await checkins.set_mark(s, u, t.id, week, True)
+        await payments.set_setting(s, COMMON_CHAT, str(COMMON))
+        await payments.set_setting(s, COMMON_THREAD, "77")
+        await s.commit()
+    clock["today"] = MON
+    session = tg[2]
+    original = session.make_request
+
+    async def topic_gone(bot, method, timeout=None):  # noqa: ANN001
+        if isinstance(method, SendMessage) and method.message_thread_id == 77:
+            raise TelegramBadRequest(method=method, message="Bad Request: message thread not found")
+        return await original(bot, method, timeout)
+    session.make_request = topic_gone
+    assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is True
+    posts = [c for c in session.of_type(SendMessage) if c.chat_id == COMMON]
+    assert posts[-1].message_thread_id is None and "Итоги недели" in posts[-1].text
+    assert "Тема для итогов недели" in session.sent(ADMIN_ID)[-1]
