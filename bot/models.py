@@ -2,7 +2,7 @@
 
 users, wheel_of_balance, explore_list, priorities, essential_intent,
 weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members,
-archived_checkins, archived_daily_marks, app_settings, cohorts, cohort_prices, price_overrides, payments
+archived_checkins, archived_daily_marks, app_settings, cohorts, cohort_prices, price_overrides, payments, meetings
 """
 from __future__ import annotations
 
@@ -417,3 +417,18 @@ class Payment(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
     decided_by: Mapped[int | None] = mapped_column(BigInteger)
     reminded_at: Mapped[datetime | None] = mapped_column(DateTime)  # админу напомнили, что чек ждёт проверки
+
+
+class Meeting(Base):
+    """Встреча сообщества: анонс в общий чат (тема «встречи») и напоминания за день и за час.
+    Время — местное (Астана). weekly — каждую неделю в тот же день недели и время, пока не выключат."""
+    __tablename__ = "meetings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    details: Mapped[str] = mapped_column(Text)  # что за встреча, ссылка
+    starts_at: Mapped[datetime] = mapped_column(DateTime)  # разовая — когда; регулярная — первая
+    weekly: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    created_by: Mapped[int | None] = mapped_column(BigInteger)
+    day_reminded_for: Mapped[datetime | None] = mapped_column(DateTime)   # встреча, о которой напомнили за день
+    hour_reminded_for: Mapped[datetime | None] = mapped_column(DateTime)  # … и за час
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

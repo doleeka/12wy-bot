@@ -104,3 +104,9 @@ def local_today(settings: Settings | None) -> date:
     """Сегодняшняя дата в часовом поясе бота."""
     tz = ZoneInfo(settings.timezone) if settings else None
     return datetime.now(tz).date()
+
+
+def local_now(settings: Settings | None) -> datetime:
+    """Местное время бота без пояса (как хранятся встречи)."""
+    tz = ZoneInfo(settings.timezone) if settings else None
+    return datetime.now(tz).replace(tzinfo=None, second=0, microsecond=0)

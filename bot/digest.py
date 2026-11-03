@@ -105,33 +105,24 @@ async def send_admin_digest(bot: Bot, sessionmaker: async_sessionmaker, settings
 
 
 async def send_common_weekly(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings) -> bool:
-    """Понедельник: итоги прошлой недели в общий чат сообщества — только числа, все потоки вместе,
-    участницы общего чата («Базовый» и «Фокус-группа»); кто на паузе до оплаты — не считается."""
-    from bot.team_notify import common_chat_id, common_thread_id, in_common_chat  # noqa: PLC0415 — без цикла
+    """Понедельник: итоги прошлой недели в общий чат сообщества (в тему «итоги») — только числа, все потоки
+    вместе, участницы общего чата («Базовый» и «Фокус-группа»); кто на паузе до оплаты — не считается."""
+    from bot import community  # noqa: PLC0415 — без циклического импорта
+    from bot.team_notify import common_chat_id, in_common_chat  # noqa: PLC0415
 
     today = local_today(settings)
     week = scorecard.week_start(today) - timedelta(days=7)
     async with sessionmaker() as session:
-        chat_id = await common_chat_id(session)
-        if chat_id is None:
+        if await common_chat_id(session) is None:
             return False
-        thread_id = await common_thread_id(session)
 
         async def skip(user) -> bool:  # noqa: ANN001
             return not in_common_chat(user) or await payments.locked(session, user, today, settings.admin_ids)
 
         stats = await week_stats(session, week, None, skip)
-    if not stats.participants:
-        return False
-    text = texts.COMMON_WEEKLY.format(
-        period=period(week), checked=stats.checked, participants=stats.participants,
-        good=stats.bucket("good"), avg=f"{stats.average}%" if stats.average is not None else "—")
-    if await safe_send(bot, chat_id, text, thread_id=thread_id):
-        return True
-    if thread_id is None:
-        return False
-    # тему удалили или закрыли — публикуем в общей ветке и говорим админу
-    sent = await safe_send(bot, chat_id, text)
-    for admin_id in settings.admin_ids:
-        await safe_send(bot, admin_id, texts.COMMON_TOPIC_LOST)
-    return sent
+        if not stats.participants:
+            return False
+        text = texts.COMMON_WEEKLY.format(
+            period=period(week), checked=stats.checked, participants=stats.participants,
+            good=stats.bucket("good"), avg=f"{stats.average}%" if stats.average is not None else "—")
+        return await community.post(bot, session, settings, community.RESULTS, text)

@@ -22,6 +22,7 @@ router.message.filter(F.chat.type == "private")
 
 # t.me/<бот>?start=solo — пригласить сразу на самостоятельное прохождение: только приложение, без тройки
 SOLO_START = "solo"
+PAY_START = "pay"  # кнопка «Оплатить в боте» в общем чате
 
 
 async def _join_solo_by_link(bot: Bot | None, session: AsyncSession, user, settings: Settings | None) -> None:
@@ -44,6 +45,16 @@ async def cmd_start(message: Message, session: AsyncSession, settings: Settings 
     user = await get_or_create_user(session, message.from_user)
     if command is not None and (command.args or "").strip().lower() == SOLO_START:
         await _join_solo_by_link(bot, session, user, settings)
+    if command is not None and (command.args or "").strip().lower() == PAY_START:  # «Оплатить в боте» из общего чата
+        from bot.handlers.payments import month_to_pay, offer  # noqa: PLC0415 — без циклического импорта
+        month = await month_to_pay(session, user, settings)
+        if month is None:
+            await message.answer(texts.PAY_NOTHING_DUE)
+            return
+        text, markup = await offer(session, user, month, texts.PAY_DUE.format(
+            month=month, weeks=f"{4 * month - 3}–{4 * month}"))
+        await message.answer(text, reply_markup=markup)
+        return
     name = escape(message.from_user.first_name or "")
     today = local_today(settings)
     cycle.maybe_finish_cycle(user, today)

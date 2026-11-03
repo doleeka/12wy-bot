@@ -116,8 +116,35 @@ async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, set
             if await safe_send(bot, user.telegram_id, text, markup):
                 sent += 1
             await asyncio.sleep(SEND_DELAY)
+        await post_payment_window(bot, session, settings, today)
     log.info("Напоминания об оплате: %d", sent)
     return sent
+
+
+async def post_payment_window(bot: Bot, session, settings: Settings, today) -> int:  # noqa: ANN001
+    """В общий чат (тема «оплата»): пятница перед 2-м и 3-м месяцем потока — окно открыто, понедельник — последний
+    день. Без имён и сумм, с кнопкой «Оплатить в боте». Только если в потоке есть кому платить."""
+    from bot import community  # noqa: PLC0415
+
+    posted = 0
+    button = None
+    for cohort in await payments.cohorts(session):
+        for month in (2, 3):
+            monday = payments.month_start(cohort.start, month)
+            if today not in (monday - timedelta(days=payments.WINDOW_DAYS), monday):
+                continue
+            users = await session.scalars(select(User).where(
+                User.cohort_id == cohort.id, User.onboarding_step == OnboardingStep.DONE, User.excluded_at.is_(None)))
+            payers = [u for u in users if u.telegram_id not in settings.admin_ids and u.paid_through < month
+                      and not await payments.is_free(session, u)]
+            if not payers:
+                continue
+            text = (texts.PAY_CHAT_LAST_DAY.format(n=cohort.number, month=month) if today == monday else
+                    texts.PAY_CHAT_WINDOW.format(n=cohort.number, month=month, weeks=f"{4 * month - 3}–{4 * month}",
+                                                 monday=f"{monday:%d.%m}"))
+            button = button or await community.open_bot_button(bot, "💳 Оплатить в боте", start="pay")
+            posted += await community.post(bot, session, settings, community.PAYMENT, text, button)
+    return posted
 
 
 STALE_RECEIPT_HOURS = 3
@@ -190,6 +217,26 @@ async def nudge_unfinished_onboarding(bot: Bot, sessionmaker: async_sessionmaker
     return sent
 
 
+async def send_meeting_reminders(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings,
+                                 now: datetime | None = None) -> int:
+    """Каждые 5 минут: встречи — «завтра» за сутки и «через час» за час, в общий чат (тема «встречи»)."""
+    from bot import community  # noqa: PLC0415
+    from bot.config import local_now  # noqa: PLC0415
+    from bot.services import meetings  # noqa: PLC0415
+
+    now = now or local_now(settings)
+    sent = 0
+    async with sessionmaker() as session:
+        for meeting, occ, kind in await meetings.due_reminders(session, now):
+            details = escape(meeting.details)
+            text = (texts.MEETING_HOUR.format(time=f"{occ:%H:%M}", details=details) if kind == "hour" else
+                    texts.MEETING_DAY.format(when=meetings.when_text(meeting, occ) if not meeting.weekly
+                                             else f"{occ:%H:%M}", details=details))
+            sent += await community.post(bot, session, settings, community.MEETINGS, text)
+        await session.commit()
+    return sent
+
+
 def _hm(value: str) -> tuple[int, int]:
     hour, minute = value.split(":")
     return int(hour), int(minute)
@@ -236,6 +283,13 @@ def setup_scheduler(bot: Bot, sessionmaker: async_sessionmaker, settings: Settin
         args=[bot, sessionmaker, settings],
         id="payment_reminders",
         misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        send_meeting_reminders,
+        CronTrigger(minute="*/5", timezone=settings.timezone),
+        args=[bot, sessionmaker, settings],
+        id="meeting_reminders",
+        misfire_grace_time=240,
     )
     scheduler.add_job(
         remind_stale_receipts,

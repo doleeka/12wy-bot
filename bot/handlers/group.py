@@ -9,7 +9,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import ChatMemberUpdated, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot import texts
+from bot import community, texts
 from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.handlers.teams import team_rows
@@ -73,6 +73,7 @@ async def cmd_linkcommon(message: Message, session: AsyncSession, bot: Bot) -> N
     # в чате с темами — пишем в ту тему, где отправили команду; в общей ветке или обычном чате — без темы
     thread = message.message_thread_id if message.is_topic_message else None
     await payments.set_setting(session, COMMON_THREAD, str(thread or ""))
+    await community.set_topic(session, community.RESULTS, thread)  # итоги — сюда
     await message.answer(texts.COMMON_LINKED)  # в чат — коротко, его видят все; подробности — админу в личку
     details = texts.COMMON_LINKED_ADMIN.format(topic=texts.COMMON_LINKED_ADMIN_TOPIC if thread else "")
     try:  # ссылки новеньким и возврат после оплаты — только если бот админ с правом приглашать
@@ -85,6 +86,39 @@ async def cmd_linkcommon(message: Message, session: AsyncSession, bot: Bot) -> N
     await safe_send(bot, message.from_user.id, details)
 
 
+@router.message(Command("topic"), IsAdmin())
+async def cmd_topic(message: Message, command: CommandObject, session: AsyncSession, bot: Bot) -> None:
+    """/topic встречи — в этой теме общего чата будут встречи (итоги, приветствие, бот, объявления, оплата)."""
+    if await common_chat_id(session) != message.chat.id:
+        await message.answer(texts.TOPIC_NOT_COMMON)
+        return
+    kind = community.KIND_ALIASES.get((command.args or "").strip().lower())
+    if kind is None:
+        rows = []
+        for k, thread in (await community.topics(session)).items():
+            where = texts.TOPIC_THREAD.format(id=thread) if thread else texts.TOPIC_GENERAL
+            rows.append(texts.TOPIC_ROW.format(kind=community.KINDS[k], where=where))
+        await safe_send(bot, message.from_user.id, texts.TOPIC_LIST.format(rows="\n".join(rows)) + "\n\n" + texts.TOPIC_USAGE)
+        return
+    thread = message.message_thread_id if message.is_topic_message else None
+    await community.set_topic(session, kind, thread)
+    await message.answer(texts.TOPIC_SET.format(kind=community.KINDS[kind]))
+
+
+@router.message(F.new_chat_members)
+async def on_new_members(message: Message, session: AsyncSession, bot: Bot,
+                         settings: Settings | None = None) -> None:
+    """Новенькие в общем чате — приветствие с кнопкой «Открыть бота» (в тему «приветствие»)."""
+    if await common_chat_id(session) != message.chat.id:
+        return
+    people = [m for m in message.new_chat_members if not m.is_bot]
+    if not people:
+        return
+    names = ", ".join(escape(m.first_name or "") or "подруга" for m in people)
+    await community.post(bot, session, settings, community.WELCOME, texts.CHAT_WELCOME.format(names=names),
+                         await community.open_bot_button(bot))
+
+
 @router.message(Command("unlinkcommon"), IsAdmin())
 async def cmd_unlinkcommon(message: Message, session: AsyncSession) -> None:
     if await common_chat_id(session) == message.chat.id:
@@ -94,7 +128,7 @@ async def cmd_unlinkcommon(message: Message, session: AsyncSession) -> None:
         await message.answer(texts.GROUP_NOT_LINKED)
 
 
-@router.message(Command("linkteam", "unlinkteam", "linkcommon", "unlinkcommon"))
+@router.message(Command("linkteam", "unlinkteam", "linkcommon", "unlinkcommon", "topic"))
 async def group_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

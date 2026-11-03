@@ -247,4 +247,4 @@ async def test_common_topic_gone_falls_back_to_general(sessionmaker, tg, clock):
     assert await send_common_weekly(tg[1], sessionmaker, SETTINGS) is True
     posts = [c for c in session.of_type(SendMessage) if c.chat_id == COMMON]
     assert posts[-1].message_thread_id is None and "Итоги недели" in posts[-1].text
-    assert "Тема для итогов недели" in session.sent(ADMIN_ID)[-1]
+    assert "Тема для «итоги недели»" in session.sent(ADMIN_ID)[-1]
