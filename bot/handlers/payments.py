@@ -378,7 +378,7 @@ async def cmd_who(message: Message, session: AsyncSession, settings: Settings | 
         paid, unpaid, free, onboarding = [], [], [], 0
         for u in users:
             row = texts.WHO_ROW.format(name=display_name(u), tg_id=u.telegram_id,
-                                       tariff=TARIFF_NAMES.get(u.tariff or "", "—"))
+                                       tariff=TARIFF_NAMES.get(u.tariff or "", "—"), joined=f"{u.created_at:%d.%m}")
             if u.onboarding_step not in (OnboardingStep.DONE, OnboardingStep.FINISHED) and u.paid_through == 0:
                 onboarding += 1
             elif await payments.is_free(session, u):
@@ -456,38 +456,44 @@ async def cmd_price(message: Message, command: CommandObject, session: AsyncSess
         amount=texts.PRICE_NONE + " (как у потока)" if amount is None else money(amount)))
 
 
-def _started(user: User, today) -> bool:  # noqa: ANN001
-    """Цикл уже идёт (или прошёл) — отметки привязаны к неделям прежнего потока."""
-    return user.cycle_start is not None and user.cycle_start <= today
+async def _move_kind(session: AsyncSession, user: User, cohort, today) -> str:  # noqa: ANN001
+    """'keep' — цикл ещё не начался; 'shift' — начался, но до старта потока она ничего не отмечала (пришла поздно):
+    тот же план, неделя 1 — со стартом потока; 'carry' — правда проходила прежние недели: они — в историю."""
+    from bot.services import cycle  # noqa: PLC0415
+
+    if user.cycle_start is None or user.cycle_start > today:
+        return "keep"
+    return "carry" if await cycle.has_marks_before(session, user, cohort.start) else "shift"
 
 
 async def _move(bot: Bot, session: AsyncSession, user: User, cohort, settings: Settings | None) -> None:  # noqa: ANN001
-    """Перевести в другой поток. План сохраняется: если цикл уже шёл, прежний остаётся в истории, а план
-    переезжает в новый цикл со стартом нового потока. Тройка — из нового потока (из чата прежней тройки убираем);
+    """Перевести в другой поток, сохранив план. Тройка — из нового потока (из чата прежней тройки убираем);
     общий чат — общий для всех потоков, остаётся. Оплата нового цикла — с нуля, по ценам нового потока."""
     from bot.handlers.teams import apply_tariff_team  # noqa: PLC0415 — без циклического импорта
     from bot.services import cycle  # noqa: PLC0415
 
-    started = _started(user, local_today(settings))
+    kind = await _move_kind(session, user, cohort, local_today(settings))
     old_team = await teams.get_team_of(session, user)
     if old_team is not None:
         await teams.leave_team(session, user)
         if old_team.chat_id:
             await remove_from_chat(bot, old_team.chat_id, user.telegram_id)
-    if started:
-        await cycle.carry_plan_to_new_cycle(session, user)
+    if kind == "carry":
+        await cycle.carry_plan_to_new_cycle(session, user, cohort.start)
         if user.onboarding_step == OnboardingStep.FINISHED:
             user.onboarding_step = OnboardingStep.DONE
+    if kind == "shift":
+        await cycle.shift_cycle_start(session, user, cohort.start)
+    elif user.cycle_start is not None:  # план подтверждён — неделя 1 вместе с новым потоком
+        user.cycle_start = cohort.start
     user.cohort_id = cohort.id
     user.paid_through = 0
     user.pay_choice = None
     user.chats_paused = False
-    if user.cycle_start is not None:  # план подтверждён — неделя 1 вместе с новым потоком
-        user.cycle_start = cohort.start
     await session.commit()
     await apply_tariff_team(bot, session, user, settings)  # подтверждённый план — сразу в тройку нового потока
     await safe_send(bot, user.telegram_id, texts.COHORT_MOVED.format(n=cohort.number, start=f"{cohort.start:%d.%m.%Y}")
-                    + (texts.COHORT_MOVED_HISTORY if started else ""))
+                    + (texts.COHORT_MOVED_HISTORY if kind == "carry" else ""))
 
 
 async def cmd_cohort_move(message: Message, args: list[str], session: AsyncSession, bot: Bot,
@@ -514,7 +520,8 @@ async def cmd_cohort_move(message: Message, args: list[str], session: AsyncSessi
             problems.append(f"{display_name(u)} — уже в потоке {cohort.number}")
             continue
         targets.append(u)
-        what = texts.COHORT_MOVE_RESTART if _started(u, today) else texts.COHORT_MOVE_KEEP
+        what = {"keep": texts.COHORT_MOVE_KEEP, "shift": texts.COHORT_MOVE_SHIFT,
+                "carry": texts.COHORT_MOVE_RESTART}[await _move_kind(session, u, cohort, today)]
         rows.append(f"• {display_name(u)} · <code>{u.telegram_id}</code> — {what}")
     tail = ("\n\n⚠️ " + "\n⚠️ ".join(problems)) if problems else ""
     if not targets:

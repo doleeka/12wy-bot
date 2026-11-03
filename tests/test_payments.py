@@ -419,7 +419,7 @@ async def test_cohort_move_keeps_plan(sessionmaker, tg):
     tg[2].calls.clear()
     await send(tg, "/cohort move 2 201 202 нетакой", ADMIN_ID, "private", ADMIN_ID)
     preview = tg[2].sent(ADMIN_ID)[-1]
-    assert "цикл уже идёт" in preview and "цикл ещё не начался" in preview and "не нашла" in preview
+    assert "проходила прежние недели" in preview and "цикл ещё не начался" in preview and "не нашла" in preview
     assert "/cohort move 2 201 202 confirm" in preview
     assert (await user(sessionmaker, 201)).cohort_id == 1 and not tg[2].sent(201)  # предпросмотр ничего не меняет
 
@@ -449,3 +449,43 @@ async def test_cohort_move_keeps_plan(sessionmaker, tg):
 
     await send(tg, "/cohort move 2 201", ADMIN_ID, "private", ADMIN_ID)
     assert "уже в потоке 2" in tg[2].sent(ADMIN_ID)[-1]
+
+
+async def test_cohort_that_started_at_week5_late_joiner_and_veteran(sessionmaker, tg, clock):
+    """2-й поток стартует 02.11 (5-я неделя 1-го). Пришла поздно — тот же план, отметки этой недели = её неделя 1;
+    проходила 1-й поток — прежние недели в историю, отметки с 02.11 переезжают к плану нового цикла."""
+    from sqlalchemy import select
+    from bot.models import Checkin, PlanWeekSnapshot
+    from bot.services import checkins, scorecard
+
+    await member(sessionmaker, 301, "basic")  # поздняя: старт выровняли на 05.10, отмечать начала только 02.11
+    await member(sessionmaker, 302, "basic")  # проходила с 05.10
+    async with sessionmaker() as s:
+        late, vet = await teams.get_user_by_telegram_id(s, 301), await teams.get_user_by_telegram_id(s, 302)
+        for t in await checkins.tactics_for_week(s, late, MON):
+            await checkins.set_mark(s, late, t.id, MON, True)
+        for week in (OCT5, MON):
+            for t in await checkins.tactics_for_week(s, vet, week):
+                await checkins.set_mark(s, vet, t.id, week, True)
+        s.add(PlanWeekSnapshot(user_id=late.id, cycle=1, week_number=1, plan=[]))  # снимок недели, которой у неё не было
+        await s.commit()
+
+    await send(tg, "/cohort new 02.11.2026", ADMIN_ID, "private", ADMIN_ID)
+    assert "Создан поток 3" in tg[2].sent(ADMIN_ID)[-1]
+    await send(tg, "/cohort move 3 301 302", ADMIN_ID, "private", ADMIN_ID)
+    preview = tg[2].sent(ADMIN_ID)[-1]
+    assert "301</code> — до старта потока ничего не отмечала" in preview
+    assert "302</code> — проходила прежние недели" in preview
+    await send(tg, "/cohort move 3 301 302 confirm", ADMIN_ID, "private", ADMIN_ID)
+
+    async with sessionmaker() as s:
+        late, vet = await teams.get_user_by_telegram_id(s, 301), await teams.get_user_by_telegram_id(s, 302)
+        assert (late.cycle, late.cycle_start, late.cohort_id) == (1, MON, 3)  # тот же цикл и те же действия
+        assert checkins.checkin_week_number(late, MON) == 1 and await scorecard.week_percent(s, late, MON) == 100
+        snaps = list(await s.scalars(select(PlanWeekSnapshot.week_number).where(PlanWeekSnapshot.user_id == late.id)))
+        assert snaps == [-1]  # чужая неделя 1 к её неделе 1 не применяется, запись цела
+        assert (vet.cycle, vet.cycle_start) == (2, MON)
+        assert await scorecard.week_percent(s, vet, MON) == 100  # отметки 02.11 переехали к новому плану
+        all_marks = list(await s.scalars(select(Checkin).where(Checkin.user_id == vet.id)))
+        assert len(all_marks) == 8  # история 05.10 цела
+        assert (await teams.get_team_of(s, late)).cohort_id == 3

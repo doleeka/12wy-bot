@@ -189,11 +189,42 @@ async def end_test_cycle(session: AsyncSession, user: User, real_start: date) ->
     return marks
 
 
-async def carry_plan_to_new_cycle(session: AsyncSession, user: User) -> None:
+async def has_marks_before(session: AsyncSession, user: User, day: date) -> bool:
+    """Отмечала ли что-то раньше этой даты — то есть правда проходила недели до неё."""
+    from bot.models import DailyMark  # noqa: PLC0415
+
+    checkin = await session.scalar(select(Checkin.id).where(Checkin.user_id == user.id, Checkin.week_start < day).limit(1))
+    daily = await session.scalar(select(DailyMark.id).where(DailyMark.user_id == user.id, DailyMark.day < day).limit(1))
+    return checkin is not None or daily is not None
+
+
+async def shift_cycle_start(session: AsyncSession, user: User, start: date) -> None:
+    """Тот же цикл и тот же план, но неделя 1 — с другой даты (пришла поздно, а неделями до неё не жила).
+    Снимки плана тех недель, что она не проходила, к новым неделям не применяем: убираем их номера в минус
+    (запись остаётся)."""
+    from bot.models import PlanWeekSnapshot  # noqa: PLC0415
+
+    shelved = list(await session.scalars(select(PlanWeekSnapshot).where(
+        PlanWeekSnapshot.user_id == user.id, PlanWeekSnapshot.cycle == user.cycle, PlanWeekSnapshot.week_number > 0)))
+    used = set(await session.scalars(select(PlanWeekSnapshot.week_number).where(
+        PlanWeekSnapshot.user_id == user.id, PlanWeekSnapshot.cycle == user.cycle, PlanWeekSnapshot.week_number < 0)))
+    for snap in shelved:
+        n = -snap.week_number
+        while n in used:  # уже переносили раньше — не сталкиваемся с прежними
+            n -= 100
+        used.add(n)
+        snap.week_number = n
+    user.cycle_start = start
+    user.last_reported_week = None
+    await session.flush()
+
+
+async def carry_plan_to_new_cycle(session: AsyncSession, user: User, start: date | None = None) -> None:
     """Перевод в другой поток, когда цикл уже шёл: прежний цикл остаётся в истории как есть (отметки, снимки
     недель, колесо), а в новый цикл копируется её план — колесо, желания, приоритеты с «зачем» и действия.
-    Онбординг заново не нужен; старт нового цикла задаёт поток."""
-    from bot.models import EssentialIntent, ExploreItem, Priority, WheelOfBalance  # noqa: PLC0415
+    Онбординг заново не нужен; старт нового цикла задаёт поток. Отметки с даты start и позже (уже недели нового
+    потока) переезжают к скопированным действиям — их не теряем."""
+    from bot.models import DailyMark, EssentialIntent, ExploreItem, Priority, WheelOfBalance  # noqa: PLC0415
 
     old, new = user.cycle, user.cycle + 1
     for w in list(await session.scalars(select(WheelOfBalance).where(
@@ -217,8 +248,15 @@ async def carry_plan_to_new_cycle(session: AsyncSession, user: User) -> None:
             session.add(EssentialIntent(priority_id=copy.id, text=intent.text))
         for t in list(await session.scalars(select(WeeklyTactic).where(
                 WeeklyTactic.priority_id == p.id, WeeklyTactic.is_active))):
-            session.add(WeeklyTactic(priority_id=copy.id, user_id=user.id, text=t.text, weeks=t.weeks, days=t.days))
+            new_t = WeeklyTactic(priority_id=copy.id, user_id=user.id, text=t.text, weeks=t.weeks, days=t.days)
+            session.add(new_t)
+            await session.flush()
             t.is_active = False  # прежние действия — история прошлого цикла
+            if start is not None:
+                await session.execute(update(Checkin).where(Checkin.tactic_id == t.id, Checkin.week_start >= start)
+                                      .values(tactic_id=new_t.id))
+                await session.execute(update(DailyMark).where(DailyMark.tactic_id == t.id, DailyMark.day >= start)
+                                      .values(tactic_id=new_t.id))
     user.cycle = new
     user.last_reported_week = None
     await session.flush()
