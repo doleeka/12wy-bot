@@ -187,3 +187,38 @@ async def end_test_cycle(session: AsyncSession, user: User, real_start: date) ->
     user.test_mode_since = None
     await session.flush()
     return marks
+
+
+async def carry_plan_to_new_cycle(session: AsyncSession, user: User) -> None:
+    """Перевод в другой поток, когда цикл уже шёл: прежний цикл остаётся в истории как есть (отметки, снимки
+    недель, колесо), а в новый цикл копируется её план — колесо, желания, приоритеты с «зачем» и действия.
+    Онбординг заново не нужен; старт нового цикла задаёт поток."""
+    from bot.models import EssentialIntent, ExploreItem, Priority, WheelOfBalance  # noqa: PLC0415
+
+    old, new = user.cycle, user.cycle + 1
+    for w in list(await session.scalars(select(WheelOfBalance).where(
+            WheelOfBalance.user_id == user.id, WheelOfBalance.cycle == old))):
+        session.add(WheelOfBalance(user_id=user.id, cycle=new, sphere=w.sphere, score=w.score))
+    explore_ids = {}
+    for e in list(await session.scalars(select(ExploreItem).where(
+            ExploreItem.user_id == user.id, ExploreItem.cycle == old).order_by(ExploreItem.id))):
+        copy = ExploreItem(user_id=user.id, cycle=new, text=e.text, selected=e.selected)
+        session.add(copy)
+        await session.flush()
+        explore_ids[e.id] = copy.id
+    for p in list(await session.scalars(select(Priority).where(
+            Priority.user_id == user.id, Priority.cycle == old).order_by(Priority.position))):
+        copy = Priority(user_id=user.id, cycle=new, position=p.position, title=p.title,
+                        explore_item_id=explore_ids.get(p.explore_item_id))
+        session.add(copy)
+        await session.flush()
+        intent = await session.scalar(select(EssentialIntent).where(EssentialIntent.priority_id == p.id))
+        if intent is not None:
+            session.add(EssentialIntent(priority_id=copy.id, text=intent.text))
+        for t in list(await session.scalars(select(WeeklyTactic).where(
+                WeeklyTactic.priority_id == p.id, WeeklyTactic.is_active))):
+            session.add(WeeklyTactic(priority_id=copy.id, user_id=user.id, text=t.text, weeks=t.weeks, days=t.days))
+            t.is_active = False  # прежние действия — история прошлого цикла
+    user.cycle = new
+    user.last_reported_week = None
+    await session.flush()

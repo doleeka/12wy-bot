@@ -631,13 +631,38 @@ PRICE_PERSONAL_ROW = "• {name} · id <code>{tg_id}</code> — {tariff}, {perio
 PRICE_SAVED = "Сохранила.\n\n{table}"
 PRICE_PERSONAL_SAVED = "Сохранила: {name} — {tariff}, {period}: {amount}."
 PRICE_BAD = "Не поняла. " 
-COHORT_LIST = "<b>Потоки</b>\n{rows}\n\n<code>/cohort new 28.12.2026</code> — новый поток (старт — понедельник)\n<code>/cohort enroll 2</code> — новенькие попадают во 2-й поток"
+COHORT_LIST = (
+    "<b>Потоки</b>\n{rows}\n\n<code>/cohort new 28.12.2026</code> — новый поток (старт — понедельник)\n"
+    "<code>/cohort enroll 2</code> — новенькие попадают во 2-й поток\n"
+    "<code>/cohort move 2 @ник id …</code> — перевести во 2-й поток (сначала предпросмотр)"
+)
 COHORT_ROW = "• Поток {n} · старт {start} · участниц: {count}{enrolling}"
 COHORT_ENROLLING = " · ✅ идёт набор"
 COHORT_CREATED = "Создан поток {n}, старт {start}. Задай цены: <code>/price {n} базовый 1 …</code>; открыть набор: <code>/cohort enroll {n}</code>"
 COHORT_NOT_MONDAY = "Старт потока — понедельник. {day} — не понедельник."
 COHORT_BAD_DATE = "Дата — в виде ДД.ММ.ГГГГ, например <code>/cohort new 28.12.2026</code>."
 COHORT_NOT_FOUND = "Потока {n} нет. Список: /cohort"
+COHORT_MOVE_USAGE = (
+    "Перевести в другой поток: <code>/cohort move 2 @ник1 123456789 …</code> — сначала покажу, что будет, "
+    "потом подтвердишь. id — в /who."
+)
+COHORT_MOVE_KEEP = "цикл ещё не начался — план сохранится"
+COHORT_MOVE_RESTART = (
+    "цикл уже идёт — план переедет в новый поток, отметки недель прежнего потока останутся в истории"
+)
+COHORT_MOVE_PREVIEW = (
+    "Перевод в <b>поток {n}</b> (старт {start}):\n{rows}\n\n"
+    "Из прежней тройки и её чата — выйдет; тройка — из нового потока. Общий чат остаётся. "
+    "Оплата — по ценам нового потока, с 1-го месяца. Каждой придёт сообщение о переводе.\n\n"
+    "Подтвердить: <code>{cmd}</code>"
+)
+COHORT_MOVE_DONE = "Готово: в поток {n} переведено {count}:\n{rows}"
+COHORT_MOVE_NOBODY = "Некого переводить."
+COHORT_MOVED = (
+    "🌿 Организатор перевела тебя в <b>поток {n}</b> — неделя 1 начнётся {start}. Твой план сохранён: "
+    "цели, «зачем» и действия на месте, поправить можно в приложении."
+)
+COHORT_MOVED_HISTORY = "\nОтметки прошлых недель сохранились в истории."
 COHORT_ENROLL_DONE = "Готово: новенькие теперь попадают в поток {n} (старт {start})."
 
 # ---------- чаты: общий (базовый + фокус-группа), пауза до оплаты ----------

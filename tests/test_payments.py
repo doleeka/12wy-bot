@@ -397,3 +397,55 @@ async def test_who_and_bulk_paid(sessionmaker, tg):
     await turn_on(tg)
     await send(tg, "/paid 106", ADMIN_ID, "private", ADMIN_ID)
     assert "доступ открыт по 2-й месяц" in tg[2].sent(106)[-1]
+
+
+async def test_cohort_move_keeps_plan(sessionmaker, tg):
+    """Перевод во 2-й поток: план сохраняется; если цикл шёл — прежний остаётся в истории, план — в новом цикле."""
+    from aiogram.methods import BanChatMember
+    from sqlalchemy import func, select
+    from bot.models import Checkin, OnboardingStep, Priority, User, WeeklyTactic
+    from bot.services import checkins
+
+    await member(sessionmaker, 201, "basic")  # цикл идёт: 5-я неделя 1-го потока, есть отметки
+    await member(sessionmaker, 203, "basic")  # сокомандница — остаётся в 1-м потоке
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 201)
+        for t in await checkins.tactics_for_week(s, u, OCT5):
+            await checkins.set_mark(s, u, t.id, OCT5, True)
+        (await teams.get_team_of(s, u)).chat_id = -100777
+        s.add(User(telegram_id=202, first_name="U202", onboarding_step=OnboardingStep.EXPLORE, cohort_id=1))
+        await s.commit()
+
+    tg[2].calls.clear()
+    await send(tg, "/cohort move 2 201 202 нетакой", ADMIN_ID, "private", ADMIN_ID)
+    preview = tg[2].sent(ADMIN_ID)[-1]
+    assert "цикл уже идёт" in preview and "цикл ещё не начался" in preview and "не нашла" in preview
+    assert "/cohort move 2 201 202 confirm" in preview
+    assert (await user(sessionmaker, 201)).cohort_id == 1 and not tg[2].sent(201)  # предпросмотр ничего не меняет
+
+    await send(tg, "/cohort move 2 201 202 confirm", ADMIN_ID, "private", ADMIN_ID)
+    assert "переведено 2" in tg[2].sent(ADMIN_ID)[-1]
+    async with sessionmaker() as s:
+        u = await teams.get_user_by_telegram_id(s, 201)
+        assert (u.cohort_id, u.cycle, u.cycle_start, u.paid_through) == (2, 2, DEC28, 0)
+        assert u.onboarding_step == OnboardingStep.DONE
+        new_p = list(await s.scalars(select(Priority).where(Priority.user_id == u.id, Priority.cycle == 2)))
+        old_p = list(await s.scalars(select(Priority).where(Priority.user_id == u.id, Priority.cycle == 1)))
+        assert [p.title for p in new_p] == [p.title for p in old_p] and len(new_p) == 2
+        assert len(await checkins.active_tactics(s, u)) == 4  # действия переехали
+        old_active = await s.scalar(select(func.count(WeeklyTactic.id)).where(
+            WeeklyTactic.priority_id.in_([p.id for p in old_p]), WeeklyTactic.is_active))
+        assert old_active == 0
+        assert await s.scalar(select(func.count(Checkin.id)).where(Checkin.user_id == u.id)) == 4  # история цела
+        team = await teams.get_team_of(s, u)
+        assert team is not None and team.cohort_id == 2
+        mate_team = await teams.get_team_of(s, await teams.get_user_by_telegram_id(s, 203))
+        assert mate_team.cohort_id == 1 and mate_team.id != team.id
+        v = await teams.get_user_by_telegram_id(s, 202)
+        assert (v.cohort_id, v.cycle, v.cycle_start) == (2, 1, None)  # ещё в онбординге — просто другой поток
+    assert [(b.chat_id, b.user_id) for b in tg[2].of_type(BanChatMember)] == [(-100777, 201)]
+    assert "поток 2" in tg[2].sent(201)[-1] and "Отметки прошлых недель" in tg[2].sent(201)[-1]
+    assert "поток 2" in tg[2].sent(202)[-1]
+
+    await send(tg, "/cohort move 2 201", ADMIN_ID, "private", ADMIN_ID)
+    assert "уже в потоке 2" in tg[2].sent(ADMIN_ID)[-1]
