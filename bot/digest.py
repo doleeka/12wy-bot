@@ -102,3 +102,26 @@ async def send_admin_digest(bot: Bot, sessionmaker: async_sessionmaker, settings
         if await safe_send(bot, admin_id, text):
             sent += 1
     return sent
+
+
+async def send_common_weekly(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings) -> bool:
+    """Понедельник: итоги прошлой недели в общий чат сообщества — только числа, все потоки вместе,
+    участницы общего чата («Базовый» и «Фокус-группа»); кто на паузе до оплаты — не считается."""
+    from bot.team_notify import common_chat_id, in_common_chat  # noqa: PLC0415 — без циклического импорта
+
+    today = local_today(settings)
+    week = scorecard.week_start(today) - timedelta(days=7)
+    async with sessionmaker() as session:
+        chat_id = await common_chat_id(session)
+        if chat_id is None:
+            return False
+
+        async def skip(user) -> bool:  # noqa: ANN001
+            return not in_common_chat(user) or await payments.locked(session, user, today, settings.admin_ids)
+
+        stats = await week_stats(session, week, None, skip)
+    if not stats.participants:
+        return False
+    return await safe_send(bot, chat_id, texts.COMMON_WEEKLY.format(
+        period=period(week), checked=stats.checked, participants=stats.participants,
+        good=stats.bucket("good"), avg=f"{stats.average}%" if stats.average is not None else "—"))

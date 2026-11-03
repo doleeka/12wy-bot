@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from html import escape
 
 from aiogram import Bot
@@ -14,12 +15,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot import keyboards, texts
 from bot.backup_job import send_backup
-from bot.digest import send_admin_digest
+from bot.digest import send_admin_digest, send_common_weekly
 from bot.config import Settings, local_today
 from bot.handlers.checkin import build_checkin
 from bot.handlers.cycle import summary_text
 from bot.models import OnboardingStep, User
-from bot.notify import safe_send
+from bot.notify import display_name, safe_send
+from bot.team_notify import pause_chats
 from bot.services import checkins, cycle, payments, scorecard
 from bot.services.tactics import days_label
 
@@ -104,6 +106,8 @@ async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, set
             elif due and user.cycle_start and today == payments.month_start(user.cycle_start, due) + timedelta(days=1):
                 month = due
                 header = texts.PAY_DUE.format(month=month, weeks=weeks(month))
+                await pause_chats(bot, session, user)  # пауза — тихо убираем из чатов, после оплаты вернём
+                await session.commit()
             if header is None:
                 continue
             text, markup = await offer(session, user, month, header)
@@ -111,6 +115,76 @@ async def send_payment_reminders(bot: Bot, sessionmaker: async_sessionmaker, set
                 sent += 1
             await asyncio.sleep(SEND_DELAY)
     log.info("Напоминания об оплате: %d", sent)
+    return sent
+
+
+STALE_RECEIPT_HOURS = 3
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def remind_stale_receipts(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings,
+                                now: datetime | None = None) -> int:
+    """Чек ждёт решения 3+ часа — один раз напоминаем админам (с кнопками). Ночью не будим: с 9 до 22.
+    now — текущее время UTC (для тестов)."""
+    from bot.handlers.payments import decision_buttons  # noqa: PLC0415 — без циклического импорта
+
+    now = now or _utcnow()
+    hour = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(settings.timezone)).hour
+    if not 9 <= hour < 22:
+        return 0
+    border = now - timedelta(hours=STALE_RECEIPT_HOURS)
+    sent = 0
+    async with sessionmaker() as session:
+        for payment, user in await payments.pending(session):
+            if payment.reminded_at is not None or payment.created_at > border:
+                continue
+            text = texts.PAY_ADMIN_STALE.format(
+                hours=STALE_RECEIPT_HOURS, name=display_name(user), tg_id=user.telegram_id,
+                tariff=payments.TARIFF_NAMES[payment.tariff], amount=payments.money(payment.amount))
+            for admin_id in settings.admin_ids:
+                sent += await safe_send(bot, admin_id, text, decision_buttons(payment.id))
+            payment.reminded_at = now
+        await session.commit()
+    return sent
+
+
+NUDGE_AFTER = (timedelta(days=2), timedelta(days=5))  # первое — через 2 дня после «Старт», второе — ещё через 5
+NUDGE_ONLY_RECENT = timedelta(days=30)  # давно бросивших не трогаем
+
+
+async def nudge_unfinished_onboarding(bot: Bot, sessionmaker: async_sessionmaker, settings: Settings,
+                                      now: datetime | None = None) -> int:
+    """Нажала «Старт», но не дошла до конца: через 2 дня — напоминание, ещё через 5 — второе, мягкое, и всё.
+    Кому нужна оплата — не трогаем (у них свой экран). Админу — сколько напомнили. now — UTC (для тестов)."""
+    now = now or _utcnow()
+    today = local_today(settings)
+    sent = 0
+    async with sessionmaker() as session:
+        users = await session.scalars(select(User).where(
+            User.onboarding_step.not_in([OnboardingStep.DONE, OnboardingStep.FINISHED]), User.excluded_at.is_(None),
+            User.cycle == 1, User.onboarding_nudges < len(NUDGE_AFTER), User.created_at >= now - NUDGE_ONLY_RECENT))
+        for user in list(users):
+            if user.telegram_id in settings.admin_ids or await payments.locked(session, user, today, settings.admin_ids):
+                continue
+            since = user.onboarding_nudged_at or user.created_at
+            if now - since < NUDGE_AFTER[user.onboarding_nudges]:
+                continue
+            name = escape(user.first_name or "")
+            text = (texts.NUDGE_1.format(name=name, left=texts.NUDGE_LEFT.get(user.onboarding_step.value, "немного"))
+                    if user.onboarding_nudges == 0 else texts.NUDGE_2.format(name=name))
+            markup = keyboards.open_app(settings.webapp_url) if settings.webapp_url else None
+            if await safe_send(bot, user.telegram_id, text, markup):
+                sent += 1
+            user.onboarding_nudges += 1
+            user.onboarding_nudged_at = now
+            await asyncio.sleep(SEND_DELAY)
+        await session.commit()
+    if sent:
+        for admin_id in settings.admin_ids:
+            await safe_send(bot, admin_id, texts.NUDGE_ADMIN.format(n=sent))
     return sent
 
 
@@ -145,12 +219,35 @@ def setup_scheduler(bot: Bot, sessionmaker: async_sessionmaker, settings: Settin
         id="admin_digest",
         misfire_grace_time=3600,
     )
+    hour, minute = _hm(settings.common_weekly_time)
+    scheduler.add_job(
+        send_common_weekly,
+        CronTrigger(day_of_week="mon", hour=hour, minute=minute, timezone=settings.timezone),
+        args=[bot, sessionmaker, settings],
+        id="common_weekly",
+        misfire_grace_time=3600,
+    )
     hour, minute = _hm(settings.payment_time)
     scheduler.add_job(
         send_payment_reminders,
         CronTrigger(hour=hour, minute=minute, timezone=settings.timezone),
         args=[bot, sessionmaker, settings],
         id="payment_reminders",
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        remind_stale_receipts,
+        CronTrigger(minute=5, timezone=settings.timezone),  # каждый час
+        args=[bot, sessionmaker, settings],
+        id="stale_receipts",
+        misfire_grace_time=1800,
+    )
+    hour, minute = _hm(settings.nudge_time)
+    scheduler.add_job(
+        nudge_unfinished_onboarding,
+        CronTrigger(hour=hour, minute=minute, timezone=settings.timezone),
+        args=[bot, sessionmaker, settings],
+        id="onboarding_nudges",
         misfire_grace_time=3600,
     )
     hour, minute = _hm(settings.backup_time)

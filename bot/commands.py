@@ -37,6 +37,7 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="price", description="Админ: цены тарифов по потокам и личные"),
     BotCommand(command="cohort", description="Админ: потоки — старт и набор"),
     BotCommand(command="paid", description="Админ: отметить оплату без чека"),
+    BotCommand(command="revenue", description="Админ: деньги за месяц, паузы, чеки"),
     BotCommand(command="broadcast", description="Админ: сообщение всем (с предпросмотром)"),
     BotCommand(command="stats", description="Админ: сводка недели (без имён)"),
     BotCommand(command="teams", description="Админ: все команды"),

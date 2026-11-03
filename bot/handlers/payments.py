@@ -4,7 +4,8 @@
 Админ: /payment (реквизиты, вкл/выкл), /price (цены потоков и личные), /cohort (потоки), /paid (без чека)."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -21,6 +22,8 @@ from bot.notify import display_name, safe_send
 from bot.services import members, payments, teams
 from bot.services.payments import TARIFF_NAMES, money, months_word
 from bot.services.users import get_or_create_user
+from bot.team_notify import (common_chat_id, in_common_chat, pause_chats, remove_from_chat, restore_chats,
+                              send_common_link)
 
 router = Router(name="payments")
 router.message.filter(F.chat.type == "private")
@@ -88,14 +91,24 @@ async def welcome(bot: Bot, user: User, settings: Settings | None) -> None:
     await safe_send(bot, user.telegram_id, text, reply_markup=keyboards.wheel_begin(settings.webapp_url if settings else ""))
 
 
-async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Settings | None, text: str) -> None:
-    """Ей — что доступ открыт; тариф меняет команду (приложение — без тройки, фокус — фокус-группа);
-    если она ещё не начинала — приветствие онбординга."""
+async def after_paid(bot: Bot, session: AsyncSession, user: User, settings: Settings | None, text: str,
+                     old_tariff: str | None) -> None:
+    """Ей — что доступ открыт; тариф меняет команду (приложение — без тройки, фокус — фокус-группа) и общий чат;
+    была на паузе — ссылки вернуться в чаты; ещё не начинала — приветствие онбординга."""
     from bot.handlers.teams import apply_tariff_team  # noqa: PLC0415 — без циклического импорта
 
     await session.commit()
     await safe_send(bot, user.telegram_id, text)
+    common_before = old_tariff in (payments.BASIC, payments.FOCUS)
+    common_now = in_common_chat(user)
     await apply_tariff_team(bot, session, user, settings)
+    if user.chats_paused:
+        await restore_chats(bot, session, user)
+    elif user.is_ready and common_now and not common_before:  # перешла с «Приложения» — в общий чат
+        await send_common_link(bot, session, user)
+    if common_before and not common_now and (chat_id := await common_chat_id(session)):
+        await remove_from_chat(bot, chat_id, user.telegram_id)  # «Приложение» — без общего чата
+    await session.commit()
     if user.onboarding_step == OnboardingStep.WHEEL:
         await welcome(bot, user, settings)
 
@@ -110,6 +123,13 @@ def _period(payment: Payment) -> str:
     return texts.PAY_MONTHS_RANGE.format(a=a) if a == b else texts.PAY_MONTHS_RANGE_MANY.format(a=a, b=b)
 
 
+def decision_buttons(payment_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Оплата пришла", callback_data=f"pay:ok:{payment_id}"),
+        InlineKeyboardButton(text="❌ Оплаты нет", callback_data=f"pay:no:{payment_id}"),
+    ]])
+
+
 # ---------- участница ----------
 
 @router.callback_query(F.data.startswith("pay:pick:"))
@@ -122,8 +142,9 @@ async def on_pick(callback: CallbackQuery, session: AsyncSession, bot: Bot, sett
         return
     await callback.answer()
     if opt.amount == 0:  # бесплатный тариф — без чека
+        old_tariff = user.tariff
         await payments.grant(session, user, opt, month, None)
-        await after_paid(bot, session, user, settings, texts.PAY_FREE.format(tariff=TARIFF_NAMES[opt.tariff]))
+        await after_paid(bot, session, user, settings, texts.PAY_FREE.format(tariff=TARIFF_NAMES[opt.tariff]), old_tariff)
         return
     user.pay_choice = opt.code
     await session.commit()
@@ -148,10 +169,7 @@ async def on_receipt(message: Message, session: AsyncSession, bot: Bot, settings
     caption = texts.PAY_ADMIN_RECEIPT.format(
         name=display_name(user), tg_id=user.telegram_id, cohort=cohort.number if cohort else "—",
         tariff=TARIFF_NAMES[opt.tariff], period=months_word(opt.months), months=_period(payment), amount=money(opt.amount))
-    buttons = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Оплата пришла", callback_data=f"pay:ok:{payment.id}"),
-        InlineKeyboardButton(text="❌ Оплаты нет", callback_data=f"pay:no:{payment.id}"),
-    ]])
+    buttons = decision_buttons(payment.id)
     for admin_id in _admins(settings):
         try:
             await bot.copy_message(admin_id, message.chat.id, message.message_id, caption=caption, reply_markup=buttons)
@@ -196,11 +214,12 @@ async def on_decision(callback: CallbackQuery, session: AsyncSession, bot: Bot, 
     if callback.message is not None:
         await callback.message.edit_reply_markup(reply_markup=None)
     if action == "ok":
+        old_tariff = user.tariff
         payments.approve(payment, user, callback.from_user.id)
         for other in await payments.pending_of(session, user):  # другие её чеки за то же — тоже закрыты
             if other.id != payment.id:
                 payments.approve(other, user, callback.from_user.id)
-        await after_paid(bot, session, user, settings, _approved_text(user))
+        await after_paid(bot, session, user, settings, _approved_text(user), old_tariff)
         reply = texts.PAY_ADMIN_APPROVED.format(name=display_name(user), tariff=TARIFF_NAMES[user.tariff],
                                                 month=user.paid_through)
     else:
@@ -241,8 +260,10 @@ async def cmd_payment(message: Message, command: CommandObject, session: AsyncSe
         for user, month in to_lock:
             if user.onboarding_step == OnboardingStep.WHEEL and month == 1:
                 continue  # ещё не начинала — увидит выбор тарифа, как только напишет боту
+            await pause_chats(bot, session, user)
             text, markup = await offer_due(session, user, month, user.first_name or "")
             sent += await safe_send(bot, user.telegram_id, text, reply_markup=markup)
+        await session.commit()
         await message.answer(texts.PAY_ON.format(sent=sent))
         return
     if head == "off":
@@ -291,11 +312,12 @@ async def cmd_paid(message: Message, command: CommandObject, session: AsyncSessi
     tariff = user.tariff or payments.BASIC
     monthly = await payments.price(session, user, tariff, 1) or 0
     amount = (await payments.price(session, user, tariff, 3) if months == 3 else None) or monthly * months
+    old_tariff = user.tariff
     await payments.grant(session, user, payments.Option(tariff, months, amount), month_from, message.from_user.id)
     for other in await payments.pending_of(session, user):  # её чеки, если были, больше не ждут решения
         payments.approve(other, user, message.from_user.id)
         user.tariff = tariff
-    await after_paid(bot, session, user, settings, _approved_text(user))
+    await after_paid(bot, session, user, settings, _approved_text(user), old_tariff)
     await message.answer(texts.PAID_DONE.format(who=display_name(user), month=user.paid_through,
                                                 tariff=TARIFF_NAMES[tariff]))
 
@@ -392,7 +414,48 @@ async def cmd_cohort(message: Message, command: CommandObject, session: AsyncSes
     await message.answer(texts.COHORT_LIST.format(rows="\n".join(rows) or "—"))
 
 
-@router.message(Command("payment", "paid", "price", "cohort"))
+MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь",
+               "Ноябрь", "Декабрь"]
+
+
+def _month_bounds(year: int, month: int, tz: str) -> tuple[datetime, datetime]:
+    """Календарный месяц по местному времени → границы в UTC (так хранится время подтверждения)."""
+    zone = ZoneInfo(tz)
+    start = datetime(year, month, 1, tzinfo=zone)
+    end = datetime(year + month // 12, month % 12 + 1, 1, tzinfo=zone)
+    return (start.astimezone(timezone.utc).replace(tzinfo=None), end.astimezone(timezone.utc).replace(tzinfo=None))
+
+
+@router.message(Command("revenue"), IsAdmin())
+async def cmd_revenue(message: Message, session: AsyncSession, settings: Settings | None = None) -> None:
+    """Деньги: этот и прошлый месяц по потокам и тарифам, кто на паузе, чеки на проверке."""
+    today = local_today(settings)
+    tz = settings.timezone if settings else "Asia/Almaty"
+    prev_year, prev_month = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+    parts = {}
+    for key, (y, m) in (("this", (today.year, today.month)), ("prev", (prev_year, prev_month))):
+        r = await payments.revenue(session, *_month_bounds(y, m, tz))
+        parts[f"{key}_name"] = f"{MONTH_NAMES[m - 1]} {y}"
+        parts[f"{key}_total"] = money(r.total) if r.total else "0 ₸"
+        parts[f"{key}_count"] = r.count
+        parts[f"{key}_rows"] = "\n".join(texts.REVENUE_ROW.format(
+            cohort=n or "—", tariff=TARIFF_NAMES.get(t, t), count=c, total=money(a)) for n, t, c, a in r.rows) \
+            or texts.REVENUE_NONE
+    users = list(await session.scalars(select(User).where(
+        User.onboarding_step.in_([OnboardingStep.DONE, OnboardingStep.FINISHED]), User.excluded_at.is_(None))))
+    paused = free = 0
+    for u in users:
+        if u.telegram_id in _admins(settings):
+            continue
+        paused += await payments.locked(session, u, today, _admins(settings))
+        free += await payments.is_free(session, u)
+    waiting = await payments.pending(session)
+    await message.answer(texts.REVENUE.format(
+        **parts, paused=paused, pending=len(waiting),
+        pending_total=money(sum(p.amount for p, _ in waiting)) if waiting else "0 ₸", free=free))
+
+
+@router.message(Command("payment", "paid", "price", "cohort", "revenue"))
 async def payments_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

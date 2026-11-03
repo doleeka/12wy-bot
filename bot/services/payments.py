@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import AppSetting, Cohort, CohortPrice, OnboardingStep, Payment, PaymentStatus, PriceOverride, User
@@ -319,3 +319,23 @@ async def would_lock(session: AsyncSession, today: date, admin_ids: list[int]) -
         if month is not None:
             out.append((u, month))
     return out
+
+
+@dataclass
+class Revenue:
+    total: int
+    count: int
+    rows: list[tuple[int | None, str, int, int]]  # (номер потока, тариф, оплат, сумма)
+
+
+async def revenue(session: AsyncSession, since: datetime, until: datetime) -> Revenue:
+    """Подтверждённые платные оплаты за период (по времени подтверждения, UTC) — по потокам и тарифам."""
+    rows = await session.execute(
+        select(Cohort.number, Payment.tariff, func.count(Payment.id), func.sum(Payment.amount))
+        .outerjoin(Cohort, Cohort.id == Payment.cohort_id)
+        .where(Payment.status == PaymentStatus.APPROVED, Payment.amount > 0,
+               Payment.decided_at >= since, Payment.decided_at < until)
+        .group_by(Cohort.number, Payment.tariff).order_by(Cohort.number, Payment.tariff)
+    )
+    out = [(n, t, c, a) for n, t, c, a in rows]
+    return Revenue(total=sum(r[3] for r in out), count=sum(r[2] for r in out), rows=out)

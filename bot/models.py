@@ -94,6 +94,11 @@ class User(Base):
     paid_through: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     # Что выбрала к оплате («basic:1») — ждём чек
     pay_choice: Mapped[str | None] = mapped_column(String(16))
+    # Доступ на паузе — бот убрал её из чатов; после оплаты пришлёт ссылки вернуться
+    chats_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Напоминания закончить онбординг: сколько отправлено и когда последнее
+    onboarding_nudges: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    onboarding_nudged_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -411,3 +416,4 @@ class Payment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
     decided_by: Mapped[int | None] = mapped_column(BigInteger)
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime)  # админу напомнили, что чек ждёт проверки

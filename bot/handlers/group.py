@@ -1,4 +1,4 @@
-"""Групповой чат команды: привязка, отвязка, /team в группе, служебные события."""
+"""Групповые чаты: чат команды (привязка, отвязка, /team), общий чат сообщества (/linkcommon), служебные события."""
 from __future__ import annotations
 
 import logging
@@ -14,8 +14,8 @@ from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.handlers.teams import team_rows
 from bot.notify import display_name, safe_send
-from bot.services import teams
-from bot.team_notify import create_invite, notify_admins
+from bot.services import payments, teams
+from bot.team_notify import COMMON_CHAT, common_chat_id, create_invite, notify_admins
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,30 @@ async def cmd_unlinkteam_group(message: Message, session: AsyncSession) -> None:
     await message.answer(texts.GROUP_UNLINKED.format(team=escape(teams.team_name(team))))
 
 
-@router.message(Command("linkteam", "unlinkteam"))
+@router.message(Command("linkcommon"), IsAdmin())
+async def cmd_linkcommon(message: Message, session: AsyncSession, bot: Bot) -> None:
+    """Общий чат сообщества (базовый + фокус-группа, все потоки): итоги недели и ссылки для новеньких."""
+    await payments.set_setting(session, COMMON_CHAT, str(message.chat.id))
+    await message.answer(texts.COMMON_LINKED)
+    try:  # ссылки новеньким и возврат после оплаты — только если бот админ с правом приглашать
+        me = await bot.get_chat_member(message.chat.id, (await bot.me()).id)
+        can_invite = me.status == "creator" or getattr(me, "can_invite_users", False)
+    except Exception:  # noqa: BLE001
+        can_invite = False
+    if not can_invite:
+        await message.answer(texts.COMMON_INVITE_FAILED)
+
+
+@router.message(Command("unlinkcommon"), IsAdmin())
+async def cmd_unlinkcommon(message: Message, session: AsyncSession) -> None:
+    if await common_chat_id(session) == message.chat.id:
+        await payments.set_setting(session, COMMON_CHAT, "")
+        await message.answer(texts.COMMON_UNLINKED)
+    else:
+        await message.answer(texts.GROUP_NOT_LINKED)
+
+
+@router.message(Command("linkteam", "unlinkteam", "linkcommon", "unlinkcommon"))
 async def group_admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
 

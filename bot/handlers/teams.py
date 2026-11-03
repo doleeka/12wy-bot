@@ -14,7 +14,7 @@ from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.models import OnboardingStep, Team, User
 from bot.notify import display_name, safe_send
-from bot.team_notify import chat_line, notify_team, remove_from_chat
+from bot.team_notify import chat_line, notify_team, remove_from_chat, send_common_link
 from bot.services import members as members_svc, scorecard, teams
 from bot.services.users import get_or_create_user
 
@@ -54,6 +54,7 @@ async def join_team(
     members = await teams.team_members(session, team.id)
     name = escape(teams.team_name(team))
     await message.answer(texts.TEAM_JOINED.format(team=name, mates=_mates_text(user, members)) + chat_line(team))
+    await send_common_link(bot, session, user)  # «Базовый» и «Фокус-группа» — ещё и в общий чат сообщества
     await notify_team(
         bot, session, team, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)), settings, exclude=user
     )

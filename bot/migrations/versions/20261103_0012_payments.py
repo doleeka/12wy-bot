@@ -1,4 +1,5 @@
-"""Оплата по месяцам: потоки, цены тарифов, личные цены, чеки; тариф и оплаченные месяцы у участниц
+"""Оплата по месяцам: потоки, цены тарифов, личные цены, чеки; тариф и оплаченные месяцы у участниц;
+пауза в чатах и напоминания закончить онбординг
 
 Revision ID: 0012
 Revises: 0011
@@ -75,6 +76,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
         sa.Column('decided_at', sa.DateTime(), nullable=True),
         sa.Column('decided_by', sa.BigInteger(), nullable=True),
+        sa.Column('reminded_at', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['cohort_id'], ['cohorts.id'], name=op.f('fk_payments_cohort_id_cohorts'), ondelete='SET NULL'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_payments_user_id_users'), ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id', name=op.f('pk_payments')),
@@ -86,6 +88,9 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column('tariff', sa.String(length=16), nullable=True))
         batch_op.add_column(sa.Column('paid_through', sa.Integer(), server_default=sa.text('0'), nullable=False))
         batch_op.add_column(sa.Column('pay_choice', sa.String(length=16), nullable=True))
+        batch_op.add_column(sa.Column('chats_paused', sa.Boolean(), server_default=sa.text('0'), nullable=False))
+        batch_op.add_column(sa.Column('onboarding_nudges', sa.Integer(), server_default=sa.text('0'), nullable=False))
+        batch_op.add_column(sa.Column('onboarding_nudged_at', sa.DateTime(), nullable=True))
         batch_op.create_index(batch_op.f('ix_users_cohort_id'), ['cohort_id'], unique=False)
         batch_op.create_foreign_key(batch_op.f('fk_users_cohort_id_cohorts'), 'cohorts', ['cohort_id'], ['id'], ondelete='SET NULL')
     with op.batch_alter_table('teams', schema=None) as batch_op:
@@ -115,6 +120,9 @@ def downgrade() -> None:
     with op.batch_alter_table('users', schema=None) as batch_op:
         batch_op.drop_constraint(batch_op.f('fk_users_cohort_id_cohorts'), type_='foreignkey')
         batch_op.drop_index(batch_op.f('ix_users_cohort_id'))
+        batch_op.drop_column('onboarding_nudged_at')
+        batch_op.drop_column('onboarding_nudges')
+        batch_op.drop_column('chats_paused')
         batch_op.drop_column('pay_choice')
         batch_op.drop_column('paid_through')
         batch_op.drop_column('tariff')
