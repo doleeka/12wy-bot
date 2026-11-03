@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import keyboards, texts
 from bot.config import Settings, local_today
 from bot.models import OnboardingStep, Priority, User
-from bot.services import cycle
+from bot.services import cycle, payments
 from bot.services import onboarding as svc
 from bot.handlers.teams import join_team
 from bot.services.tactics import weeks_label
@@ -213,7 +213,7 @@ async def _save_tactic(
 async def _advance(
     message: Message, session: AsyncSession, user: User, bot: Bot, settings: Settings | None
 ) -> None:
-    finished = svc.advance_tactics(user, local_today(settings), settings.cycle_start if settings else None)
+    finished = svc.advance_tactics(user, local_today(settings), await payments.cohort_start(session, user, settings))
     if not finished:
         priority = await svc.current_tactic_priority(session, user)
         await message.answer(tactic_question(priority))

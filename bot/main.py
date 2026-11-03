@@ -23,6 +23,7 @@ from bot.middlewares import DbSessionMiddleware, ExcludedMiddleware
 from bot.notify import safe_send
 from bot.scheduler import setup_scheduler
 from bot.services.backup import apply_pending_restore
+from bot.services import payments as payments_svc
 from bot.services.onboarding import align_to_cohort_start
 from webapp.app import create_app
 
@@ -70,12 +71,16 @@ async def main() -> None:
     await asyncio.to_thread(run_migrations, settings.database_path)
     engine = create_engine(settings.database_url)
     moved = 0
-    if settings.cycle_start:
-        async with create_sessionmaker(engine)() as session:
-            moved = await align_to_cohort_start(session, settings.cycle_start, local_today(settings))
-            await session.commit()
-        if moved:
-            logging.info("Перенесено на общий старт %s: %d", settings.cycle_start, moved)
+    async with create_sessionmaker(engine)() as session:
+        # у каждого потока свой общий старт; без потока — дата из настроек (COHORT_START)
+        starts = [(c.start, c.id) for c in await payments_svc.cohorts(session)]
+        if settings.cycle_start:
+            starts.append((settings.cycle_start, None))
+        for start, cohort_id in starts:
+            moved += await align_to_cohort_start(session, start, local_today(settings), cohort_id)
+        await session.commit()
+    if moved:
+        logging.info("Перенесено на общий старт потока: %d", moved)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     sessionmaker = create_sessionmaker(engine)
@@ -107,7 +112,7 @@ async def main() -> None:
     logging.info("DB: %s", settings.database_path.resolve())
     for admin_id in settings.admin_ids:
         await safe_send(bot, admin_id, texts.BOT_STARTED + (
-            texts.BOT_STARTED_ALIGNED.format(n=moved, start=f"{settings.cycle_start:%d.%m}") if moved else ""
+            texts.BOT_STARTED_ALIGNED.format(n=moved, start="своего потока") if moved else ""
         ))
     # Mini App (FastAPI) в том же процессе: общая база, тот же бот для уведомлений
     app = create_app(sessionmaker, settings, bot)

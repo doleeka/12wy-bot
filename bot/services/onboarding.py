@@ -230,16 +230,19 @@ async def reset_onboarding(session: AsyncSession, user: User) -> None:
     await session.flush()
 
 
-async def align_to_cohort_start(session: AsyncSession, cohort_start: date, today: date) -> int:
+async def align_to_cohort_start(session: AsyncSession, cohort_start: date, today: date,
+                                cohort_id: int | None = None) -> int:
     """Переносит на общую дату старта: у всех сообщество стартует в один день.
 
     — назначен раньше общего старта и ещё не начался (онбординг в сентябре → 28.09 → 05.10);
     — подтвердила план, когда цикл уже шёл, и получила следующий понедельник (12.10 → 05.10).
-    Уже идущие более ранние циклы (тест админа) не трогаем. Возвращает, сколько перенесено.
+    Уже идущие более ранние циклы (тест админа) не трогаем. Только участниц этого потока (cohort_id;
+    None — без потока): у другого потока свой старт. Возвращает, сколько перенесено.
     """
     end = cohort_start + timedelta(weeks=COHORT_WEEKS)
     users = await session.scalars(
         select(User).where(
+            User.cohort_id.is_(None) if cohort_id is None else User.cohort_id == cohort_id,
             User.cycle_start.is_not(None),
             User.cycle_start != cohort_start,
             or_(

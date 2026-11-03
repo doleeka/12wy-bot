@@ -2,7 +2,7 @@
 
 users, wheel_of_balance, explore_list, priorities, essential_intent,
 weekly_tactics, checkins, daily_marks, visions, vision_reflections, teams, team_members,
-archived_checkins, archived_daily_marks, app_settings, payments
+archived_checkins, archived_daily_marks, app_settings, cohorts, cohort_prices, price_overrides, payments
 """
 from __future__ import annotations
 
@@ -88,8 +88,12 @@ class User(Base):
     # Исключён админом из сообщества (/remove): ничего не получает, не считается, приложение закрыто.
     # Данные не удаляются — /restore возвращает
     excluded_at: Mapped[datetime | None] = mapped_column(DateTime)
-    # Оплата подтверждена админом (или участница была в боте до того, как ввели оплату)
-    paid_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Поток, тариф (app | basic | focus) и по какой месяц цикла оплачено (0–3; месяц = 4 недели: 1–4, 5–8, 9–12)
+    cohort_id: Mapped[int | None] = mapped_column(ForeignKey("cohorts.id", ondelete="SET NULL"), index=True)
+    tariff: Mapped[str | None] = mapped_column(String(16))
+    paid_through: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    # Что выбрала к оплате («basic:1») — ждём чек
+    pay_choice: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     wheel: Mapped[list[WheelOfBalance]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -303,6 +307,9 @@ class Team(Base):
     chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)  # групповой чат команды, если есть
     # Ссылка-приглашение в чат (если бот — админ группы и смог её создать)
     invite_link: Mapped[str | None] = mapped_column(String(128))
+    # Тройки и фокус-группа — свои у каждого потока; фокус-группа одна на поток и без лимита в 3
+    cohort_id: Mapped[int | None] = mapped_column(ForeignKey("cohorts.id", ondelete="SET NULL"), index=True)
+    is_focus: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     members: Mapped[list[TeamMember]] = relationship(back_populates="team", cascade="all, delete-orphan")
@@ -350,6 +357,38 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text)
 
 
+class Cohort(Base):
+    """Поток: свой старт (понедельник недели 1) и свои цены. enrolling — в него попадают новенькие."""
+    __tablename__ = "cohorts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    number: Mapped[int] = mapped_column(Integer, unique=True)
+    start: Mapped[date] = mapped_column(Date)
+    enrolling: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class CohortPrice(Base):
+    """Цена тарифа в потоке: за 1 месяц или сразу за 3. Нет строки — тарифа в потоке нет; 0 — бесплатно."""
+    __tablename__ = "cohort_prices"
+    __table_args__ = (UniqueConstraint("cohort_id", "tariff", "months"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cohort_id: Mapped[int] = mapped_column(ForeignKey("cohorts.id", ondelete="CASCADE"), index=True)
+    tariff: Mapped[str] = mapped_column(String(16))
+    months: Mapped[int] = mapped_column(Integer)
+    amount: Mapped[int] = mapped_column(Integer)
+
+
+class PriceOverride(Base):
+    """Личная цена участницы — перекрывает цену её потока."""
+    __tablename__ = "price_overrides"
+    __table_args__ = (UniqueConstraint("user_id", "tariff", "months"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    tariff: Mapped[str] = mapped_column(String(16))
+    months: Mapped[int] = mapped_column(Integer)
+    amount: Mapped[int] = mapped_column(Integer)
+
+
 class PaymentStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -357,14 +396,18 @@ class PaymentStatus(str, enum.Enum):
 
 
 class Payment(Base):
-    """Чек об оплате, присланный в бот, и решение админа по нему."""
+    """Оплата месяцев цикла: чек из бота (или отметка админа) и решение по нему."""
     __tablename__ = "payments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    file_id: Mapped[str] = mapped_column(String(256))
-    file_kind: Mapped[str] = mapped_column(String(16))  # photo | document
+    cohort_id: Mapped[int | None] = mapped_column(ForeignKey("cohorts.id", ondelete="SET NULL"))
+    tariff: Mapped[str] = mapped_column(String(16))
+    months: Mapped[int] = mapped_column(Integer)      # 1 или 3
+    month_from: Mapped[int] = mapped_column(Integer)  # с какого месяца цикла (1–3)
+    amount: Mapped[int] = mapped_column(Integer)
+    file_id: Mapped[str | None] = mapped_column(String(256))  # нет — отметила админ (/paid) или бесплатно
+    file_kind: Mapped[str | None] = mapped_column(String(16))  # photo | document
     status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus, native_enum=False), default=PaymentStatus.PENDING)
-    tariff: Mapped[str | None] = mapped_column(String(16))  # team | solo — выбирает админ при подтверждении
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
     decided_by: Mapped[int | None] = mapped_column(BigInteger)

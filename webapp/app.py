@@ -133,8 +133,8 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         user = await get_or_create_user(session, tg.user)
         if user.excluded_at is not None and user.telegram_id not in settings.admin_ids:
             raise HTTPException(status_code=403, detail="excluded")  # исключена из сообщества (/remove)
-        if not sandbox and await payments_svc.needs_payment(session, user, settings.admin_ids):
-            raise HTTPException(status_code=403, detail="unpaid")  # оплата включена, а её ещё не подтвердили
+        if not sandbox and await payments_svc.locked(session, user, local_today(settings), settings.admin_ids):
+            raise HTTPException(status_code=403, detail="unpaid")  # нужный месяц не оплачен — выбор тарифа в боте
         if sandbox:
             user.no_team = True
             if user.sandbox_week is None:
@@ -413,7 +413,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
                 }
             )
         team = await teams.get_team_of(session, user)
-        start = user.cycle_start or svc.cycle_start_for(today_for(user), settings.cycle_start)
+        start = user.cycle_start or svc.cycle_start_for(today_for(user), await payments_svc.cohort_start(session, user, settings))
         return {
             "step": user.onboarding_step.value,
             "priorities": out,
@@ -894,7 +894,7 @@ def create_app(sessionmaker: async_sessionmaker, settings: Settings, bot: Bot | 
         user.onboarding_step = OnboardingStep.DONE
         user.onboarding_position = None
         user.is_ready = True
-        user.cycle_start = svc.cycle_start_for(today_for(user), settings.cycle_start)
+        user.cycle_start = svc.cycle_start_for(today_for(user), await payments_svc.cohort_start(session, user, settings))
         await session.flush()
         if app.state.bot is not None:
             from bot.handlers.teams import join_team

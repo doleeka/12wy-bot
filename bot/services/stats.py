@@ -1,6 +1,7 @@
 """Сводка сообщества за неделю для админа — только количество, без имён и без целей."""
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -56,13 +57,15 @@ async def _week_state(session: AsyncSession, user: User, week: date) -> str:
     return "done" if await scorecard.week_percent(session, user, week) is not None else "missing"
 
 
-async def week_stats(session: AsyncSession, week: date) -> WeekStats:
+async def week_stats(session: AsyncSession, week: date, cohort_id: int | None = None,
+                     paused: Callable[[User], Awaitable[bool]] | None = None) -> WeekStats:
+    """cohort_id — только этот поток; paused — у кого доступ на паузе до оплаты (их не считаем)."""
     stats = WeekStats(week=week)
-    users = list(await session.scalars(
-        select(User)
-        .where(User.onboarding_step.in_([OnboardingStep.DONE, OnboardingStep.FINISHED]), User.excluded_at.is_(None))
-        .order_by(User.id)
-    ))
+    query = select(User).where(
+        User.onboarding_step.in_([OnboardingStep.DONE, OnboardingStep.FINISHED]), User.excluded_at.is_(None))
+    if cohort_id is not None:
+        query = query.where(User.cohort_id == cohort_id)
+    users = [u for u in await session.scalars(query.order_by(User.id)) if paused is None or not await paused(u)]
     state: dict[int, str] = {}
     for user in users:
         s = state[user.id] = await _week_state(session, user, week)

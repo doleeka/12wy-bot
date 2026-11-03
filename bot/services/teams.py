@@ -45,25 +45,34 @@ async def _member_count(session: AsyncSession, team_id: int) -> int:
     return await session.scalar(select(func.count(TeamMember.id)).where(TeamMember.team_id == team_id))
 
 
-async def _team_with_free_slot(session: AsyncSession) -> Team | None:
-    """Самая старая команда, где меньше MAX_MEMBERS участниц."""
+async def _team_with_free_slot(session: AsyncSession, cohort_id: int | None) -> Team | None:
+    """Самая старая тройка её потока, где меньше MAX_MEMBERS участниц (фокус-группа — не тройка)."""
     counts = (
         select(TeamMember.team_id, func.count(TeamMember.id).label("n")).group_by(TeamMember.team_id).subquery()
     )
     return await session.scalar(
         select(Team)
         .outerjoin(counts, counts.c.team_id == Team.id)
-        .where(func.coalesce(counts.c.n, 0) < Team.MAX_MEMBERS)
+        .where(func.coalesce(counts.c.n, 0) < Team.MAX_MEMBERS, Team.is_focus.is_(False),
+               Team.cohort_id.is_(None) if cohort_id is None else Team.cohort_id == cohort_id)
         .order_by(Team.id)
         .limit(1)
     )
 
 
-async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team | None, bool]:
-    """Добавляет участницу в команду со свободным местом или создаёт новую.
+async def focus_team(session: AsyncSession, cohort_id: int | None) -> Team | None:
+    return await session.scalar(select(Team).where(
+        Team.is_focus.is_(True), Team.cohort_id.is_(None) if cohort_id is None else Team.cohort_id == cohort_id))
 
-    Возвращает (команда, создана_ли_новая). Коммитит сразу, внутри блокировки.
-    Организатора вне команд (no_team) не распределяем: (None, False).
+
+def wants_focus(user: User) -> bool:
+    return user.tariff == "focus"
+
+
+async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team | None, bool]:
+    """Тройка её потока со свободным местом или новая; тариф «фокус-группа» — в фокус-группу потока
+    (одна на поток, без лимита). Возвращает (команда, создана_ли_новая). Коммитит сразу, внутри блокировки.
+    Вне команд (no_team) и исключённых не распределяем: (None, False).
     """
     if user.no_team or user.excluded_at is not None:
         return None, False
@@ -71,10 +80,14 @@ async def assign_to_team(session: AsyncSession, user: User) -> tuple[Team | None
         team = await get_team_of(session, user)
         if team is not None:
             return team, False
-        team = await _team_with_free_slot(session)
+        if wants_focus(user):
+            team = await focus_team(session, user.cohort_id)
+        else:
+            team = await _team_with_free_slot(session, user.cohort_id)
         created = team is None
         if created:
-            team = Team()
+            team = Team(cohort_id=user.cohort_id, is_focus=wants_focus(user),
+                        name="Фокус-группа" if wants_focus(user) else None)
             session.add(team)
             await session.flush()
         session.add(TeamMember(team_id=team.id, user_id=user.id))
@@ -97,7 +110,7 @@ async def move_to_team(session: AsyncSession, user: User, team_id: int | None) -
     async with _lock:
         old_team = await get_team_of(session, user)
         if team_id is None:
-            new_team = Team()
+            new_team = Team(cohort_id=user.cohort_id)
             session.add(new_team)
             await session.flush()
         else:
@@ -106,7 +119,7 @@ async def move_to_team(session: AsyncSession, user: User, team_id: int | None) -
                 raise TeamNotFound
             if old_team is not None and old_team.id == new_team.id:
                 return old_team, new_team
-            if await _member_count(session, new_team.id) >= Team.MAX_MEMBERS:
+            if not new_team.is_focus and await _member_count(session, new_team.id) >= Team.MAX_MEMBERS:
                 raise TeamFull
         membership = await session.scalar(select(TeamMember).where(TeamMember.user_id == user.id))
         if membership is None:

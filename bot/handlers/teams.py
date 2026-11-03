@@ -177,6 +177,37 @@ async def make_solo(bot: Bot, session: AsyncSession, user: User, settings: Setti
     return old_team, delivered, removed
 
 
+async def apply_tariff_team(bot: Bot, session: AsyncSession, user: User, settings: Settings | None) -> None:
+    """После оплаты: команда по тарифу. «Приложение» — без тройки; «Базовый» — тройка; «Фокус-группа» —
+    фокус-группа потока. Кто ещё не закончил онбординг — распределится в конце онбординга, как обычно."""
+    team = await teams.get_team_of(session, user)
+    if user.no_team:
+        if team is not None:
+            await teams.leave_team(session, user)
+            await session.commit()
+            await notify_team(bot, session, team, texts.TEAM_MEMBER_INDEPENDENT.format(name=display_name(user)), settings)
+            if team.chat_id:
+                await remove_from_chat(bot, team.chat_id, user.telegram_id)
+        return
+    if not user.is_ready or (team is not None and team.is_focus == teams.wants_focus(user)):
+        return
+    if team is not None:
+        await teams.leave_team(session, user)
+        await session.commit()
+        await notify_team(bot, session, team, texts.TEAM_MEMBER_LEFT.format(name=display_name(user)), settings)
+        if team.chat_id:
+            await remove_from_chat(bot, team.chat_id, user.telegram_id)
+    new_team, _ = await teams.assign_to_team(session, user)
+    if new_team is None:
+        return
+    name = escape(teams.team_name(new_team))
+    members = await teams.team_members(session, new_team.id)
+    await safe_send(bot, user.telegram_id,
+                    texts.TEAM_JOINED.format(team=name, mates=_mates_text(user, members)) + chat_line(new_team))
+    await notify_team(bot, session, new_team, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)),
+                      settings, exclude=user)
+
+
 @router.message(Command("moveteam"), IsAdmin())
 async def cmd_moveteam(
     message: Message, command: CommandObject, session: AsyncSession, bot: Bot, settings: Settings | None = None

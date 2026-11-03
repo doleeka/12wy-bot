@@ -8,7 +8,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import ArchivedCheckin, ArchivedDailyMark, Checkin, DailyMark, OnboardingStep, Priority, User, WeeklyTactic
-from bot.services import checkins, scorecard, wheel
+from bot.services import checkins, payments, scorecard, wheel
 
 CYCLE_DAYS = scorecard.CYCLE_WEEKS * 7
 
@@ -83,6 +83,8 @@ async def start_new_cycle(session: AsyncSession, user: User) -> None:
     user.cycle_start = None
     user.onboarding_step = OnboardingStep.WHEEL
     user.onboarding_position = None
+    user.paid_through = 0  # новый цикл — в текущем наборе, оплата заново
+    await payments.enroll(session, user)
     await session.flush()
 
 
