@@ -633,7 +633,7 @@ WHO_HINT = (
 )
 WHO_EMPTY = "Пока никого нет."
 PAID_NOTHING = "У {who} уже оплачено до конца цикла."
-PAID_DONE = "Готово: {who} — оплачено по {month}-й месяц ({tariff}). Ей написала."
+PAID_DONE = "Готово: {who} — оплачено по {month}-й месяц ({tariff})."
 PRICE_USAGE = (
     "Цены, ₸:\n"
     "<code>/price 2</code> — таблица 2-го потока\n"
