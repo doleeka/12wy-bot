@@ -142,15 +142,56 @@ async def on_pick(callback: CallbackQuery, session: AsyncSession, bot: Bot, sett
         await callback.answer(texts.PAY_ADMIN_DECIDED if month is None else texts.PAY_NO_OPTIONS, show_alert=True)
         return
     await callback.answer()
+    if opt.amount == 0 and opt.tariff == payments.APP and user.tariff not in (None, payments.APP) and user.is_ready:
+        # бесплатное «Приложение» уводит из тройки и общего чата — одним случайным нажатием этого не делаем
+        await safe_send(bot, user.telegram_id, texts.PAY_FREE_CONFIRM.format(tariff=TARIFF_NAMES[opt.tariff]),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="✅ Да, перейти", callback_data=f"pay:free:{opt.code}")],
+                            [InlineKeyboardButton(text="↩️ Выбрать другой тариф", callback_data="pay:again")]]))
+        return
     if opt.amount == 0:  # бесплатный тариф — без чека
-        old_tariff = user.tariff
-        await payments.grant(session, user, opt, month, None)
-        await after_paid(bot, session, user, settings, texts.PAY_FREE.format(tariff=TARIFF_NAMES[opt.tariff]), old_tariff)
+        await _grant_free(bot, session, user, opt, month, settings)
         return
     user.pay_choice = opt.code
     await session.commit()
     await safe_send(bot, user.telegram_id, texts.PAY_CHOSEN.format(
         label=escape(opt.label), instructions=await payments.instructions(session) or ""))
+
+
+async def _grant_free(bot: Bot, session: AsyncSession, user: User, opt, month: int,  # noqa: ANN001
+                      settings: Settings | None) -> None:
+    old_tariff = user.tariff
+    await payments.grant(session, user, opt, month, None)
+    await after_paid(bot, session, user, settings, texts.PAY_FREE.format(tariff=TARIFF_NAMES[opt.tariff]), old_tariff)
+
+
+@router.callback_query(F.data.startswith("pay:free:"))
+async def on_free_confirm(callback: CallbackQuery, session: AsyncSession, bot: Bot,
+                          settings: Settings | None = None) -> None:
+    user = await get_or_create_user(session, callback.from_user)
+    month = await month_to_pay(session, user, settings)
+    opt = await payments.option(session, user, callback.data.removeprefix("pay:free:"), month) if month else None
+    if opt is None or opt.amount != 0:
+        await callback.answer(texts.PAY_ADMIN_DECIDED, show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    await _grant_free(bot, session, user, opt, month, settings)
+
+
+@router.callback_query(F.data == "pay:again")
+async def on_pick_again(callback: CallbackQuery, session: AsyncSession, bot: Bot, settings: Settings | None = None) -> None:
+    user = await get_or_create_user(session, callback.from_user)
+    month = await month_to_pay(session, user, settings)
+    await callback.answer()
+    if callback.message is not None:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    if month is None:
+        await safe_send(bot, user.telegram_id, texts.PAY_NOTHING_DUE)
+        return
+    text, markup = await offer(session, user, month, texts.PAY_PICK_AGAIN)
+    await safe_send(bot, user.telegram_id, text, reply_markup=markup)
 
 
 @router.message(HasPayChoice(), F.photo | F.document)
@@ -199,6 +240,24 @@ async def on_locked(message: Message, session: AsyncSession, bot: Bot, settings:
 @router.callback_query(NeedsPayment())
 async def on_locked_callback(callback: CallbackQuery) -> None:
     await callback.answer(texts.PAY_CALLBACK_LOCKED, show_alert=True)
+
+
+@router.message(F.photo | F.document)
+async def on_unexpected_file(message: Message, session: AsyncSession, bot: Bot,
+                             settings: Settings | None = None) -> None:
+    """Файл или фото, когда оплату от неё не ждём (например, чек после смены тарифа), — не теряем: админу,
+    с подсказкой, что сделать; ей — что передали."""
+    if message.from_user.id in _admins(settings):
+        return
+    user = await get_or_create_user(session, message.from_user)
+    caption = texts.PAY_ADMIN_UNEXPECTED.format(name=display_name(user), tg_id=user.telegram_id,
+                                                tariff=TARIFF_NAMES.get(user.tariff or "", "—"), month=user.paid_through)
+    for admin_id in _admins(settings):
+        try:
+            await bot.copy_message(admin_id, message.chat.id, message.message_id, caption=caption)
+        except Exception:  # noqa: BLE001
+            await safe_send(bot, admin_id, caption)
+    await message.answer(texts.PAY_UNEXPECTED_RECEIVED)
 
 
 # ---------- админ: решение по чеку ----------

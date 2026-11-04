@@ -67,7 +67,9 @@ async def test_switch_to_app_leaves_common_chat(sessionmaker, tg):
     await link_chats(sessionmaker)
     await turn_on(tg)
     tg[2].calls.clear()
-    await press(tg, "pay:pick:app:1", user_id=1)  # «Приложение» в 1-м потоке бесплатно
+    await press(tg, "pay:pick:app:1", user_id=1)  # «Приложение» в 1-м потоке бесплатно — сначала подтверждение
+    assert "без тройки и без общего чата" in tg[2].sent(1)[-1] and (await user(sessionmaker, 1)).tariff == "basic"
+    await press(tg, "pay:free:app:1", user_id=1)
     u = await user(sessionmaker, 1)
     assert u.tariff == "app" and u.no_team and not u.chats_paused
     async with sessionmaker() as s:
@@ -248,3 +250,27 @@ async def test_common_topic_gone_falls_back_to_general(sessionmaker, tg, clock):
     posts = [c for c in session.of_type(SendMessage) if c.chat_id == COMMON]
     assert posts[-1].message_thread_id is None and "Итоги недели" in posts[-1].text
     assert "Тема для «итоги недели»" in session.sent(ADMIN_ID)[-1]
+
+
+async def test_misclick_on_free_app_and_receipt_after_it(sessionmaker, tg):
+    """Случай из жизни: выбрала «Базовый», потом нажала «Приложение · бесплатно», потом прислала чек."""
+    from aiogram.methods import CopyMessage
+    await member(sessionmaker, 1, "basic")
+    await link_chats(sessionmaker)
+    await turn_on(tg)
+    await press(tg, "pay:pick:basic:1", user_id=1)
+    tg[2].calls.clear()
+    await press(tg, "pay:pick:app:1", user_id=1)  # случайное нажатие — ничего не меняется, только вопрос
+    assert not tg[2].of_type(BanChatMember) and (await user(sessionmaker, 1)).tariff == "basic"
+    await press(tg, "pay:again", user_id=1)  # «Выбрать другой тариф» — снова кнопки
+    assert "Выбери тариф" in tg[2].sent(1)[-1]
+    await receipt(tg, 1)  # выбор «Базового» помнится — чек уходит админу как обычно
+    assert "Базовый" in tg[2].of_type(CopyMessage)[-1].caption
+
+    # чек, когда оплату не ждём (например, после «Приложения»), — тоже админу, с подсказкой
+    await member(sessionmaker, 2, "app", paid_through=3)
+    tg[2].calls.clear()
+    await receipt(tg, 2, document=True)
+    copy = tg[2].of_type(CopyMessage)[-1]
+    assert copy.chat_id == ADMIN_ID and "/paid тариф 2" in copy.caption and "/unpaid 2" in copy.caption
+    assert "Передала организатору" in tg[2].sent(2)[-1]
