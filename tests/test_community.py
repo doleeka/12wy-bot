@@ -178,3 +178,27 @@ async def test_payment_window_posts_in_payment_topic(sessionmaker, tg, clock):
     assert "3-му месяцу" in tg[2].sent(1)[-1]
     await send(tg, "/start pay", 2, "private", 2)
     assert "ничего не нужно" in tg[2].sent(2)[-1]
+
+
+async def test_returning_members_are_not_welcomed_again(sessionmaker, tg):
+    """Вернулась в общий чат после паузы / смены тарифа — без «добро пожаловать, начни с бота»."""
+    from bot.models import OnboardingStep, User
+    await setup_topics(tg)
+    await member(sessionmaker, 1, "basic")  # уже участница
+    async with sessionmaker() as s:
+        s.add(User(telegram_id=2, first_name="Дана", onboarding_step=OnboardingStep.EXPLORE, cohort_id=1))
+        await s.commit()
+    dp, bot = tg[0], tg[1]
+
+    async def joins(tg_id, name):
+        await dp.feed_update(bot, Update(update_id=next(_ids), message=Message(
+            message_id=next(_ids), date=datetime.now(), chat=Chat(id=COMMON, type="supergroup", title="С"),
+            from_user=TgUser(id=tg_id, is_bot=False, first_name=name),
+            new_chat_members=[TgUser(id=tg_id, is_bot=False, first_name=name)])))
+    n = len(posts(tg))
+    await joins(1, "U1")
+    assert len(posts(tg)) == n  # своя — молчим
+    await joins(2, "Дана")
+    assert "Продолжи в боте" in posts(tg)[-1].text  # не закончила онбординг — мягко
+    await joins(3, "Новая")
+    assert "Добро пожаловать, Новая!" in posts(tg)[-1].text and "нажми «Старт»" in posts(tg)[-1].text

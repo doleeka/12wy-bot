@@ -13,6 +13,7 @@ from bot import community, texts
 from bot.config import Settings, local_today
 from bot.filters import IsAdmin
 from bot.handlers.teams import team_rows
+from bot.models import OnboardingStep
 from bot.notify import display_name, safe_send
 from bot.services import payments, teams
 from bot.team_notify import COMMON_CHAT, COMMON_THREAD, common_chat_id, create_invite, notify_admins
@@ -111,12 +112,24 @@ async def on_new_members(message: Message, session: AsyncSession, bot: Bot,
     """Новенькие в общем чате — приветствие с кнопкой «Открыть бота» (в тему «приветствие»)."""
     if await common_chat_id(session) != message.chat.id:
         return
-    people = [m for m in message.new_chat_members if not m.is_bot]
-    if not people:
-        return
-    names = ", ".join(escape(m.first_name or "") or "подруга" for m in people)
-    await community.post(bot, session, settings, community.WELCOME, texts.CHAT_WELCOME.format(names=names),
-                         await community.open_bot_button(bot))
+    # приветствуем только тех, кто ещё не с нами в боте; вернувшихся (после паузы, смены тарифа, /restore) — нет
+    new, unfinished = [], []
+    for m in message.new_chat_members:
+        if m.is_bot:
+            continue
+        user = await teams.get_user_by_telegram_id(session, m.id)
+        name = escape(m.first_name or "") or "подруга"
+        if user is None:
+            new.append(name)
+        elif not user.is_ready and user.cycle == 1 and user.onboarding_step != OnboardingStep.FINISHED:
+            unfinished.append(name)
+    button = await community.open_bot_button(bot) if new or unfinished else None
+    if new:
+        await community.post(bot, session, settings, community.WELCOME,
+                             texts.CHAT_WELCOME.format(names=", ".join(new)), button)
+    if unfinished:
+        await community.post(bot, session, settings, community.WELCOME,
+                             texts.CHAT_WELCOME_CONTINUE.format(names=", ".join(unfinished)), button)
 
 
 @router.message(Command("unlinkcommon"), IsAdmin())
