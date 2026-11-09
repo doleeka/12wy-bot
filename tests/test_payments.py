@@ -33,7 +33,8 @@ SETTINGS = Settings(bot_token=TOKEN, database_path=None, admin_ids=[ADMIN_ID], w
 def clock(monkeypatch):
     """«Сегодня» для бота, расписания и приложения; по умолчанию — вторник 5-й недели 1-го потока."""
     now = {"today": TUE}
-    for mod in (pay_handlers, scheduler, appmod):
+    import bot.digest as digest
+    for mod in (pay_handlers, scheduler, appmod, digest):
         monkeypatch.setattr(mod, "local_today", lambda _s=None: now["today"])
     return now
 
