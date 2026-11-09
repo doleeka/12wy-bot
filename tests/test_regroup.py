@@ -1,5 +1,5 @@
 """/regroup: после ухода части участниц — одиночек к парам (2 → 3), оставшихся одиночек друг к другу по трое.
-Сначала план, с confirm — переводы с уведомлениями; фокус-группы, полные тройки и другие потоки не трогаем."""
+Сначала план, с confirm — переводы с уведомлениями; фокус-группу и полные тройки не трогаем, потоки смешиваем."""
 from aiogram.methods import BanChatMember
 
 from bot.models import Team
@@ -61,7 +61,7 @@ async def test_regroup_plan_preview_and_confirm(sessionmaker, tg):
 
 
 async def test_regroup_counts(sessionmaker, tg):
-    # четыре одиночки без пар — 2 + 2, а не 3 + 1; другой поток не смешиваем
+    # четыре одиночки 1-го потока и одна 2-го
     await build(sessionmaker, {"P": [21], "Q": [22], "R": [23], "S": [24]})
     async with sessionmaker() as s:
         lone = Team(name="Поток2", cohort_id=2)
@@ -72,6 +72,7 @@ async def test_regroup_counts(sessionmaker, tg):
     async with sessionmaker() as s:
         await teams.move_to_team(s, await teams.get_user_by_telegram_id(s, 25), lone_id)
         plan = await teams.regroup_plan(s)
-    assert len(plan) == 2 and {n.name for _, _, n in plan} == {"P", "R"}
+    # пятеро одиночек вместе с 2-м потоком (потоки в тройках смешиваются) — 3 + 2
+    assert len(plan) == 3 and {n.name for _, _, n in plan} == {"P", "S"}
     await send(tg, "/regroup", 5, "private", 5)
     assert "только для админа" in tg[2].sent(5)[-1]

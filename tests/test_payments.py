@@ -303,7 +303,7 @@ async def test_focus_tariff_joins_focus_group(sessionmaker, tg):
         await press(tg, [d for _, d in last_buttons(tg, ADMIN_ID) if d.startswith("pay:ok")][0])
     async with sessionmaker() as s:
         team_ids = {(await teams.get_team_of(s, await teams.get_user_by_telegram_id(s, i))).id for i in (1, 2, 3, 4)}
-        focus = await teams.focus_team(s, 1)
+        focus = await teams.focus_team(s)
     assert team_ids == {focus.id} and focus.name == "Фокус-группа"
     assert "Фокус-группа" in tg[2].sent(4)[-1]
 
@@ -351,8 +351,9 @@ async def test_off_by_default_nobody_is_paused(sessionmaker, tg):
     assert "выключена" in tg[2].sent(ADMIN_ID)[-1] and "Набор идёт в поток: 1" in tg[2].sent(ADMIN_ID)[-1]
 
 
-async def test_cohorts_do_not_mix(sessionmaker, tg):
-    """2-й поток: свой старт (28.12), свои тройки; выравнивание при старте бота не тянет его к 05.10."""
+async def test_cohorts_share_trios_but_keep_their_start(sessionmaker, tg):
+    """2-й поток: свой старт (28.12), а тройки общие — может попасть к девочкам 1-го потока;
+    выравнивание при старте бота не тянет его к 05.10."""
     from bot.services.onboarding import align_to_cohort_start
     await member(sessionmaker, 1, "basic")  # одна в тройке 1-го потока — свободные места есть
     await member(sessionmaker, 2, "basic", cohort=2, cycle_start=date(2026, 12, 21))  # «ошибочный» старт
@@ -360,7 +361,7 @@ async def test_cohorts_do_not_mix(sessionmaker, tg):
         u1, u2 = await teams.get_user_by_telegram_id(s, 1), await teams.get_user_by_telegram_id(s, 2)
         assert await payments.cohort_start(s, u2, SETTINGS) == DEC28
         t1, t2 = await teams.get_team_of(s, u1), await teams.get_team_of(s, u2)
-        assert t1.id != t2.id and t1.cohort_id == 1 and t2.cohort_id == 2
+        assert t1.id == t2.id  # свободное место в тройке 1-го потока — занимает девочка 2-го
         assert await align_to_cohort_start(s, OCT5, date(2026, 11, 3), 1) == 0  # 1-й поток не трогает 2-й
         assert await align_to_cohort_start(s, DEC28, date(2026, 11, 3), 2) == 1
         await s.commit()
@@ -439,12 +440,11 @@ async def test_cohort_move_keeps_plan(sessionmaker, tg):
         assert old_active == 0
         assert await s.scalar(select(func.count(Checkin.id)).where(Checkin.user_id == u.id)) == 4  # история цела
         team = await teams.get_team_of(s, u)
-        assert team is not None and team.cohort_id == 2
         mate_team = await teams.get_team_of(s, await teams.get_user_by_telegram_id(s, 203))
-        assert mate_team.cohort_id == 1 and mate_team.id != team.id
+        assert team is not None and mate_team.id == team.id  # тройка прежняя — потоки в тройках смешиваются
         v = await teams.get_user_by_telegram_id(s, 202)
         assert (v.cohort_id, v.cycle, v.cycle_start) == (2, 1, None)  # ещё в онбординге — просто другой поток
-    assert [(b.chat_id, b.user_id) for b in tg[2].of_type(BanChatMember)] == [(-100777, 201)]
+    assert not tg[2].of_type(BanChatMember)  # из чата тройки не убираем
     assert "поток 2" in tg[2].sent(201)[-1] and "Отметки прошлых недель" in tg[2].sent(201)[-1]
     assert "поток 2" in tg[2].sent(202)[-1]
 
@@ -489,7 +489,7 @@ async def test_cohort_that_started_at_week5_late_joiner_and_veteran(sessionmaker
         assert await scorecard.week_percent(s, vet, MON) == 100  # отметки 02.11 переехали к новому плану
         all_marks = list(await s.scalars(select(Checkin).where(Checkin.user_id == vet.id)))
         assert len(all_marks) == 8  # история 05.10 цела
-        assert (await teams.get_team_of(s, late)).cohort_id == 3
+        assert (await teams.get_team_of(s, late)) is not None  # тройка осталась
 
 
 async def test_admin_changes_tariff_without_payment(sessionmaker, tg):

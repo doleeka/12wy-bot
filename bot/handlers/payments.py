@@ -604,17 +604,13 @@ async def _move_kind(session: AsyncSession, user: User, cohort, today) -> str:  
 
 
 async def _move(bot: Bot, session: AsyncSession, user: User, cohort, settings: Settings | None) -> None:  # noqa: ANN001
-    """Перевести в другой поток, сохранив план. Тройка — из нового потока (из чата прежней тройки убираем);
-    общий чат — общий для всех потоков, остаётся. Оплата нового цикла — с нуля, по ценам нового потока."""
+    """Перевести в другой поток, сохранив план. Тройка, её чат и общий чат остаются — потоки в тройках
+    смешиваются. Оплата нового цикла — с нуля, по ценам нового потока."""
     from bot.handlers.teams import apply_tariff_team  # noqa: PLC0415 — без циклического импорта
     from bot.services import cycle  # noqa: PLC0415
 
     kind = await _move_kind(session, user, cohort, local_today(settings))
-    old_team = await teams.get_team_of(session, user)
-    if old_team is not None:
-        await teams.leave_team(session, user)
-        if old_team.chat_id:
-            await remove_from_chat(bot, old_team.chat_id, user.telegram_id)
+    # тройки не делятся по потокам — тройка и её чат остаются прежними
     if kind == "carry":
         await cycle.carry_plan_to_new_cycle(session, user, cohort.start)
         if user.onboarding_step == OnboardingStep.FINISHED:
@@ -628,7 +624,7 @@ async def _move(bot: Bot, session: AsyncSession, user: User, cohort, settings: S
     user.pay_choice = None
     user.chats_paused = False
     await session.commit()
-    await apply_tariff_team(bot, session, user, settings)  # подтверждённый план — сразу в тройку нового потока
+    await apply_tariff_team(bot, session, user, settings)  # не было тройки, а план подтверждён — распределим
     await safe_send(bot, user.telegram_id, texts.COHORT_MOVED.format(n=cohort.number, start=f"{cohort.start:%d.%m.%Y}")
                     + (texts.COHORT_MOVED_HISTORY if kind == "carry" else ""))
 
