@@ -192,3 +192,27 @@ async def migrate_chat(session: AsyncSession, old_chat_id: int, new_chat_id: int
         team.chat_id = new_chat_id
         await session.flush()
     return team
+
+
+async def regroup_plan(session: AsyncSession) -> list[tuple[User, Team, Team]]:
+    """Пересборка троек после ухода части участниц: (кто, из какой, в какую). Отдельно в каждом потоке,
+    фокус-группы не трогаем. Одиночки — сначала к парам (2 → 3), оставшиеся одиночки — друг к другу по трое
+    (на остаток — по двое). Полные тройки не трогаем. Оставляем ту команду, где есть чат."""
+    moves: list[tuple[User, Team, Team]] = []
+    by_cohort: dict[int | None, list[tuple[Team, list[User]]]] = {}
+    for team, members in await list_teams(session):
+        if not team.is_focus and members:
+            by_cohort.setdefault(team.cohort_id, []).append((team, members))
+    for groups in by_cohort.values():
+        ones = [(t, m[0]) for t, m in groups if len(m) == 1]
+        twos = [t for t, m in groups if len(m) == 2]
+        ones.sort(key=lambda x: (x[0].chat_id is None, x[0].id))  # с чатом — первыми: их команды и оставляем
+        while ones and twos:
+            team, user = ones.pop()  # без чата — первыми к парам
+            moves.append((user, team, twos.pop(0)))
+        while len(ones) >= 2:  # одиночки — между собой: 3, 3, …, остаток 2
+            take = 3 if len(ones) != 4 else 2  # 4 = 2 + 2, а не 3 + 1
+            chunk, ones = ones[:take], ones[take:]
+            target = chunk[0][0]
+            moves += [(user, team, target) for team, user in chunk[1:]]
+    return moves

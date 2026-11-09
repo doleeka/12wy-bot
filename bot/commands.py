@@ -50,6 +50,7 @@ ADMIN_COMMANDS = PARTICIPANT_COMMANDS + [
     BotCommand(command="teams", description="Админ: все команды"),
     BotCommand(command="noteam", description="Админ: я вне команд (off — вернуть)"),
     BotCommand(command="moveteam", description="Админ: перевести в команду"),
+    BotCommand(command="regroup", description="Админ: пересобрать тройки (сначала план)"),
     BotCommand(command="solo", description="Админ: только приложение, без тройки / список"),
     BotCommand(command="unsolo", description="Админ: вернуть в тройку"),
     BotCommand(command="report", description="Админ: куда слать отчёт"),

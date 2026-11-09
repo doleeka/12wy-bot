@@ -270,6 +270,42 @@ async def cmd_moveteam(
             await message.answer(texts.ADMIN_KICK_FAILED.format(name=display_name(user)))
 
 
+@router.message(Command("regroup"), IsAdmin())
+async def cmd_regroup(message: Message, command: CommandObject, session: AsyncSession, bot: Bot,
+                      settings: Settings | None = None) -> None:
+    """Пересобрать тройки, где остались по одной: сначала план, с confirm — переводы и уведомления."""
+    from bot.team_notify import personal_invite  # noqa: PLC0415
+
+    plan = await teams.regroup_plan(session)
+    if not plan:
+        await message.answer(texts.REGROUP_NOTHING)
+        return
+    rows = "\n".join(texts.REGROUP_ROW.format(name=display_name(u), old=escape(teams.team_name(o)),
+                                               new=escape(teams.team_name(n))) for u, o, n in plan)
+    if (command.args or "").strip().lower() != "confirm":
+        await message.answer(texts.REGROUP_PREVIEW.format(n=len(plan), rows=rows))
+        return
+    freed_chats = []
+    for user, old_team, new_team in plan:
+        await teams.move_to_team(session, user, new_team.id)
+        members = await teams.team_members(session, new_team.id)
+        name = escape(teams.team_name(new_team))
+        link = await personal_invite(bot, new_team.chat_id, teams.team_name(new_team)) if new_team.chat_id else None
+        chat = texts.CHAT_LINK_TEAM.format(team=name, link=escape(link)) if link else chat_line(new_team).strip()
+        await safe_send(bot, user.telegram_id,
+                        texts.TEAM_MOVED.format(team=name, mates=_mates_text(user, members)) + ("\n" + chat if chat else ""))
+        await notify_team(bot, session, new_team, texts.TEAM_NEW_MEMBER.format(team=name, name=display_name(user)),
+                          settings, exclude=user)
+        if old_team.chat_id:
+            await remove_from_chat(bot, old_team.chat_id, user.telegram_id)
+            if not await teams.team_members(session, old_team.id):
+                freed_chats.append(escape(teams.team_name(old_team)))
+    text = texts.REGROUP_DONE.format(n=len(plan), rows=rows)
+    if freed_chats:
+        text += texts.REGROUP_FREED_CHATS.format(teams=", ".join(freed_chats))
+    await message.answer(text + "\n\n" + texts.REGROUP_SEE_TEAMS)
+
+
 async def _report_solo(message: Message, user: User, old_team: Team | None, delivered: bool, removed: bool) -> None:
     old = escape(teams.team_name(old_team)) if old_team else texts.SOLO_WAS_ALONE
     text = texts.SOLO_DONE.format(who=display_name(user), old=old, tg_id=user.telegram_id)
@@ -375,6 +411,6 @@ async def cmd_unlinkteam(message: Message, command: CommandObject, session: Asyn
     await message.answer(texts.ADMIN_UNLINKED.format(team=escape(teams.team_name(team))))
 
 
-@router.message(Command("teams", "moveteam", "unlinkteam", "solo", "unsolo"))
+@router.message(Command("teams", "moveteam", "unlinkteam", "solo", "unsolo", "regroup"))
 async def admin_only(message: Message) -> None:
     await message.answer(texts.ADMIN_ONLY)
